@@ -34,6 +34,8 @@
     </style>
 </head>
 <body>
+    <audio id="bg-music" src="bg-music.mp3" loop></audio>
+    <button id="music-toggle" style="position:fixed;top:20px;right:20px;z-index:1000;font-size:20px;padding:8px 16px;border-radius:8px;border:none;background:#3498db;color:white;cursor:pointer;">🔊</button>
     <div class="container">
         <h1 id="main-title">Flappy Bird</h1>
         <div id="menu-view">
@@ -2631,6 +2633,38 @@
         
         // --- INITIALIZE ---
         setup();
+
+        // --- BACKGROUND MUSIC LOGIC ---
+        const bgMusic = document.getElementById('bg-music');
+        const musicToggle = document.getElementById('music-toggle');
+        let musicEnabled = false;
+
+        function playMusic() {
+            if (!musicEnabled) {
+                bgMusic.volume = 0.5;
+                bgMusic.play();
+                musicEnabled = true;
+                musicToggle.textContent = '🔊';
+            }
+        }
+        function pauseMusic() {
+            bgMusic.pause();
+            musicEnabled = false;
+            musicToggle.textContent = '🔇';
+        }
+        musicToggle.addEventListener('click', () => {
+            if (musicEnabled) pauseMusic();
+            else playMusic();
+        });
+
+        // Start music on first user interaction (to comply with browser policies)
+        function enableMusicOnFirstInteraction() {
+            if (!musicEnabled) playMusic();
+            window.removeEventListener('mousedown', enableMusicOnFirstInteraction);
+            window.removeEventListener('keydown', enableMusicOnFirstInteraction);
+        }
+        window.addEventListener('mousedown', enableMusicOnFirstInteraction);
+        window.addEventListener('keydown', enableMusicOnFirstInteraction);
 
     </script>
 </body>
