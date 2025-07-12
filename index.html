@@ -745,16 +745,23 @@
             }
         }
 
-        // --- MAIN GAME LOOP ---
+        const FIXED_TIME_STEP = 1000 / 60; // 16.666... ms for 60 updates per second
+        let lastTime = performance.now();
+        let accumulator = 0;
+
         function gameLoop() {
-            if (gameState === STATES.PLAYING || gameState === STATES.START) { 
-                update(); 
-            } else if (gameState === STATES.SHOP) {
-                updateShop();
-            } else if (gameState === STATES.BOSS_BATTLE) {
-                updateBossBattle();
+            const now = performance.now();
+            let delta = now - lastTime;
+            if (delta > 100) delta = 100; // avoid spiral of death on tab switch
+            lastTime = now;
+            accumulator += delta;
+
+            while (accumulator >= FIXED_TIME_STEP) {
+                update(); // update game logic
+                accumulator -= FIXED_TIME_STEP;
             }
-            draw();
+
+            draw(); // render
             requestAnimationFrame(gameLoop);
         }
 
@@ -814,7 +821,7 @@
 
                 // Pipe Spawning
                 const canSpawnPipes = eventState === 'none';
-                if(canSpawnPipes && frames % 100 === 0){
+                if(canSpawnPipes && frames % 140 === 0){
                     const topPipeHeight = Math.random()*(canvas1.height-pipeGap-150)+50;
                     const rand = Math.random();
                     let type = 'static';
