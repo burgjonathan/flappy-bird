@@ -1,0 +1,2630 @@
+<!DOCTYPE html>
+<html lang="en" dir="ltr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>Flappy Bird</title>
+    <link href="https://fonts.googleapis.com/css2?family=Rubik:wght@400;700&display=swap" rel="stylesheet">
+    <style>
+        body {
+            margin: 0; padding: 0; display: flex;
+            justify-content: center; align-items: center;
+            min-height: 100vh; background-color: #f0f8ff;
+            font-family: 'Rubik', sans-serif; color: #333; overflow: hidden;
+            transition: background-color 0.5s;
+        }
+        .container { position: relative; text-align: center; }
+        h1 { color: #0077be; transition: color 0.5s; }
+        #game-view {
+            display: none; justify-content: center; align-items: center;
+            gap: 10px; flex-wrap: wrap;
+        }
+        canvas {
+            background-color: #87CEEB; border: 2px solid #333; border-radius: 8px;
+            box-shadow: 0 4px 8px rgba(0,0,0,0.1); display: block;
+        }
+        #game-over-overlay {
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+            display: none; justify-content: center; align-items: center;
+            text-align: center; background-color: rgba(0, 0, 0, 0.7);
+            color: white; cursor: pointer;
+        }
+        #winner-text { font-size: 30px; -webkit-text-stroke: 1px black; text-shadow: 2px 2px 4px #000; }
+        .game-over-text { font-size: 24px; -webkit-text-stroke: 1px black; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1 id="main-title">Flappy Bird</h1>
+        <div id="menu-view">
+            <canvas id="menuCanvas" width="400" height="480"></canvas>
+        </div>
+        <div id="game-view">
+            <canvas id="canvas1" width="400" height="480"></canvas>
+            <canvas id="canvas2" width="400" height="480"></canvas>
+        </div>
+        <div id="game-over-overlay">
+            <div>
+                <h2 id="winner-text"></h2>
+                <p class="game-over-text">Game Over</p>
+                <p id="final-scores" style="font-size: 18px;"></p>
+                <p style="font-size: 16px;">Click to return to menu</p>
+            </div>
+        </div>
+    </div>
+    
+    <script>
+        // --- DOM ELEMENTS ---
+        const menuCanvas = document.getElementById('menuCanvas');
+        const canvas1 = document.getElementById('canvas1');
+        const canvas2 = document.getElementById('canvas2');
+        const menuCtx = menuCanvas.getContext('2d');
+        const ctx1 = canvas1.getContext('2d');
+        const ctx2 = canvas2.getContext('2d');
+
+        const menuView = document.getElementById('menu-view');
+        const gameView = document.getElementById('game-view');
+        const gameOverOverlay = document.getElementById('game-over-overlay');
+        const winnerTextElem = document.getElementById('winner-text');
+        const finalScores = document.getElementById('final-scores');
+        const mainTitle = document.getElementById('main-title');
+
+        // --- GAME VARIABLES ---
+        let player1, player2, bot, pipes, powerUps, coins, diamonds, projectiles, p1_score, p2_score, bot_score, gameState, gameMode, frames, currentSkin, currentSkinName, botDifficulty, boss;
+        let coinCount, diamondCount, totalCoins, totalDiamonds, abilityPoints;
+        let lastDiamondSpawnScore = -1;
+        let skinsScrollY = 0, maxScrollY = 0;
+        let abilitiesScrollY = 0, maxAbilitiesScrollY = 0;
+        let mapScrollX = 0, maxMapScrollX = 0, isDraggingMap = false, lastMouseX = 0;
+        let battlePassScrollY = 0, maxBattlePassScrollY = 0, isDraggingBattlePass = false, lastMouseYBP = 0;
+        let currentWorldIndex = 0;
+        let playerProjectiles = [];
+
+
+        // --- SHOP & WHEEL VARIABLES ---
+        let wheelAngle = 0, wheelVelocity = 0, isSpinning = false;
+        let wheelPrize = null;
+        const spinCost = 0;
+        let lastSpinTime = 0;
+        let previousGameState = 'home';
+
+
+        const gravity = 0.2;
+        const lift = -4.0;
+        const pipeWidth = 52;
+        const pipeGap = 120;
+        
+        // --- EVENT VARIABLES ---
+        let eventState = 'none'; // none, clearing, pre_warning_pause, warning, active
+        let eventTimer = 0;
+        let nextEventScore = 0;
+        let eventBarrages = [];
+
+        // --- BATTLE PASS & ABILITIES VARIABLES ---
+        let battlePassXP, battlePassLevel, unlockedSkins, claimedTiers, claimedPlusTiers, hasBattlePassPlus, unlockedAbilities, equippedAbility, unlockedTrails, equippedTrail;
+        let rewardToShowcase = null;
+
+        // --- DAILY MISSIONS VARIABLES ---
+        let dailyMission, missionProgress, lastMissionDate;
+        
+        const missions = [
+            { id: 0, description: "Get 25 points in a single game", type: 'score', target: 25, reward: { type: 'coins', value: 50 } },
+            { id: 1, description: "Collect 10 coins in total", type: 'collect_coins', target: 10, reward: { type: 'diamonds', value: 5 } },
+            { id: 2, description: "Play 3 games", type: 'play_games', target: 3, reward: { type: 'ability_points', value: 5 } },
+            { id: 3, description: "Get 50 points in a single game", type: 'score', target: 50, reward: { type: 'coins', value: 150 } },
+            { id: 4, description: "Collect 3 diamonds in total", type: 'collect_diamonds', target: 3, reward: { type: 'coins', value: 200 } },
+            { id: 5, description: "Win a game against a bot", type: 'win_bot', target: 1, reward: { type: 'diamonds', value: 10 } }
+        ];
+
+        const permanentAbilities = {
+            'coin_magnet': { name: 'Coin Magnet', description: 'Use F to attract coins', cost: 0, type: 'active' },
+            'blooper': { name: 'Blooper', description: 'Use F to send a Blooper to the opponent', cost: 0, type: 'active' },
+            'swap_positions': { name: 'Swap Positions', description: 'Swap places with the opponent when close', cost: 0, type: 'active' },
+            'reverse_controls': { name: 'Reverse Controls', description: 'Reverse the opponent\'s controls', cost: 0, type: 'active' },
+            'slim_profile': { name: 'Slim Profile', description: 'Makes the bird smaller', cost: 0, type: 'passive' }
+        };
+
+        const battlePassTiers = [
+            { level: 1, xpRequired: 0, reward: { type: 'coins', value: 100 } },
+            { level: 2, xpRequired: 0, reward: { type: 'ability_points', value: 5 } },
+            { level: 3, xpRequired: 0, reward: { type: 'skin', value: 'Superman' } },
+            { level: 4, xpRequired: 0, reward: { type: 'coins', value: 250 } },
+            { level: 5, xpRequired: 0, reward: { type: 'ability_points', value: 10 } },
+            { level: 6, xpRequired: 0, reward: { type: 'skin', value: 'Hulk' } },
+            { level: 7, xpRequired: 0, reward: { type: 'trail', value: 'Rainbow Trail' } },
+            { level: 8, xpRequired: 0, reward: { type: 'coins', value: 500 } },
+            { level: 9, xpRequired: 0, reward: { type: 'diamonds', value: 20 } },
+            { level: 10, xpRequired: 0, reward: { type: 'skin', value: 'King' } },
+        ];
+        
+        const battlePassPlusTiers = [
+            { level: 1, xpRequired: 0, reward: { type: 'ability_points', value: 10 } },
+            { level: 2, xpRequired: 0, reward: { type: 'diamonds', value: 25 } },
+            { level: 3, xpRequired: 0, reward: { type: 'skin', value: 'Knight' } },
+            { level: 4, xpRequired: 0, reward: { type: 'ability_points', value: 15 } },
+            { level: 5, xpRequired: 0, reward: { type: 'coins', value: 1000 } },
+            { level: 6, xpRequired: 0, reward: { type: 'skin', value: 'Dragon' } },
+            { level: 7, xpRequired: 0, reward: { type: 'coins', value: 1500 } },
+            { level: 8, xpRequired: 0, reward: { type: 'diamonds', value: 50 } },
+            { level: 9, xpRequired: 0, reward: { type: 'ability_points', value: 25 } },
+            { level: 10, xpRequired: 0, reward: { type: 'skin', value: 'Wizard' } },
+        ];
+
+        const wheelPrizes = [
+            { type: 'coins', value: 50, color: '#f1c40f' },
+            { type: 'diamonds', value: 5, color: '#9b59b6' },
+            { type: 'skin', value: 'Bumblebee', color: '#3498db' },
+            { type: 'coins', value: 150, color: '#f1c40f' },
+            { type: 'ability_points', value: 10, color: '#e67e22' },
+            { type: 'skin', value: 'Ghost', color: '#3498db' },
+            { type: 'coins', value: 250, color: '#f1c40f' },
+            { type: 'diamonds', value: 20, color: '#9b59b6' },
+        ];
+
+        // --- GAME STATES ---
+        const STATES = {
+            HOME: 'home', SKINS: 'skins', COSMETICS: 'cosmetics', ABILITIES_SHOP: 'abilities_shop', 
+            DIFFICULTY_SELECT: 'difficulty_select', START: 'start', PLAYING: 'playing', GAMEOVER: 'gameover', 
+            BATTLE_PASS: 'battle_pass', REWARD_SHOWCASE: 'reward_showcase',
+            SHOP: 'shop', CUSTOMIZATION: 'customization', BOSS_BATTLE: 'boss_battle'
+        };
+
+        // --- SKINS DEFINITION ---
+        const skins = {
+            'Default': { name: 'Default', tier: 'Common', cost: 0, draw: (ctx,bird) => { ctx.fillStyle='#FFD700'; ctx.fillRect(bird.x,bird.y,bird.width,bird.height); ctx.fillStyle='#F0E68C'; ctx.fillRect(bird.x+5,bird.y+8,15,8); ctx.fillStyle='#FFA500'; ctx.fillRect(bird.x+bird.width,bird.y+8,10,8); ctx.fillStyle='black'; ctx.beginPath(); ctx.arc(bird.x+25,bird.y+7,3,0,Math.PI*2); ctx.fill(); } },
+            'Bumblebee': { name: 'Bumblebee', tier: 'Rare', cost: 100, draw: (ctx,bird) => { ctx.fillStyle='#FFD700'; ctx.fillRect(bird.x,bird.y,bird.width,bird.height); ctx.fillStyle='black'; ctx.fillRect(bird.x,bird.y+8,bird.width,5); ctx.fillRect(bird.x,bird.y+18,bird.width,5); ctx.fillStyle='rgba(255,255,255,0.7)'; ctx.beginPath(); ctx.ellipse(bird.x+10,bird.y-2,10,5,Math.PI/4,0,2*Math.PI); ctx.fill(); ctx.beginPath(); ctx.ellipse(bird.x+15,bird.y-2,10,5,Math.PI/4,0,2*Math.PI); ctx.fill(); ctx.fillStyle='black'; ctx.beginPath(); ctx.arc(bird.x+25,bird.y+7,3,0,Math.PI*2); ctx.fill(); } },
+            'Ghost': { name: 'Ghost', tier: 'Rare', cost: 100, draw: (ctx,bird) => { ctx.save(); ctx.fillStyle='rgba(255,255,255,0.8)'; ctx.beginPath(); ctx.moveTo(bird.x,bird.y+bird.height); ctx.quadraticCurveTo(bird.x,bird.y,bird.x+bird.width/2,bird.y); ctx.quadraticCurveTo(bird.x+bird.width,bird.y,bird.x+bird.width,bird.y+bird.height); ctx.lineTo(bird.x+bird.width*.8,bird.y+bird.height*.8); ctx.lineTo(bird.x+bird.width*.6,bird.y+bird.height); ctx.lineTo(bird.x+bird.width*.4,bird.y+bird.height*.8); ctx.lineTo(bird.x+bird.width*.2,bird.y+bird.height); ctx.closePath(); ctx.fill(); ctx.fillStyle='black'; ctx.beginPath(); ctx.arc(bird.x+10,bird.y+12,3,0,Math.PI*2); ctx.fill(); ctx.beginPath(); ctx.arc(bird.x+24,bird.y+12,3,0,Math.PI*2); ctx.fill(); ctx.restore(); } },
+            'Superman': { name: 'Superman', tier: 'Epic', cost: 200, draw: (ctx,bird) => { ctx.fillStyle='red'; ctx.beginPath(); ctx.moveTo(bird.x+5,bird.y+5); ctx.lineTo(bird.x-15,bird.y+12); ctx.lineTo(bird.x+5,bird.y+20); ctx.closePath(); ctx.fill(); skins.Default.draw(ctx, bird); } },
+            'Hulk': { name: 'Hulk', tier: 'Epic', cost: 200, draw: (ctx,bird) => { ctx.fillStyle='#2E7D32'; ctx.fillRect(bird.x,bird.y,bird.width+2,bird.height+2); ctx.fillStyle='#4CAF50'; ctx.fillRect(bird.x+5,bird.y+8,15,8); ctx.fillStyle='#FFA500'; ctx.fillRect(bird.x+bird.width+2,bird.y+8,10,8); ctx.fillStyle='black'; ctx.beginPath(); ctx.arc(bird.x+25,bird.y+7,3,0,Math.PI*2); ctx.fill(); } },
+            'Knight': { name: 'Knight', tier: 'Epic', cost: 200, draw: (ctx,bird) => { skins.Default.draw(ctx, bird); ctx.fillStyle='#bdc3c7'; ctx.fillRect(bird.x+15,bird.y-5,20,10); ctx.fillStyle='#95a5a6'; ctx.fillRect(bird.x+30,bird.y-3,2,6); } },
+            'Astronaut': { name: 'Astronaut', tier: 'Epic', cost: 200, draw: (ctx,bird) => { ctx.save(); skins.Default.draw(ctx, bird); ctx.fillStyle='white'; ctx.strokeStyle='grey'; ctx.lineWidth=2; ctx.beginPath(); ctx.arc(bird.x+bird.width/2,bird.y+bird.height/2,18,0,Math.PI*2); ctx.fill(); ctx.stroke(); ctx.fillStyle='rgba(0,0,50,0.3)'; ctx.beginPath(); ctx.arc(bird.x+bird.width/2+3,bird.y+bird.height/2,14,0,Math.PI*2); ctx.fill(); ctx.restore(); } },
+            'Zombie': { name: 'Zombie', tier: 'Epic', cost: 200, draw: (ctx,bird) => { ctx.fillStyle='#9E9D24'; ctx.fillRect(bird.x,bird.y,bird.width,bird.height); ctx.fillStyle='#827717'; ctx.fillRect(bird.x+5,bird.y+8,15,8); ctx.strokeStyle='black'; ctx.lineWidth=1; ctx.beginPath(); ctx.moveTo(bird.x+10,bird.y+2); ctx.lineTo(bird.x+15,bird.y+7); ctx.stroke(); ctx.beginPath(); ctx.moveTo(bird.x+15,bird.y+2); ctx.lineTo(bird.x+10,bird.y+7); ctx.stroke(); ctx.fillStyle='white'; ctx.beginPath(); ctx.arc(bird.x+25,bird.y+7,4,0,Math.PI*2); ctx.fill(); ctx.fillStyle='black'; ctx.beginPath(); ctx.arc(bird.x+25,bird.y+7,2,0,Math.PI*2); ctx.fill(); } },
+            'Robot': { name: 'Robot', tier: 'Epic', cost: 200, draw: (ctx,bird) => { ctx.fillStyle='#7f8c8d'; ctx.fillRect(bird.x,bird.y,bird.width,bird.height); ctx.strokeStyle='#2c3e50'; ctx.lineWidth=1; ctx.strokeRect(bird.x,bird.y,bird.width,bird.height); ctx.fillStyle='#95a5a6'; ctx.fillRect(bird.x+5,bird.y+8,15,8); ctx.fillStyle='red'; ctx.fillRect(bird.x+22,bird.y+5,8,4); } },
+            'Ninja': { name: 'Ninja', tier: 'Epic', cost: 200, draw: (ctx,bird) => { ctx.fillStyle='#2c3e50'; ctx.fillRect(bird.x,bird.y,bird.width,bird.height); ctx.fillStyle='white'; ctx.fillRect(bird.x+18,bird.y+5,12,6); ctx.fillStyle='black'; ctx.beginPath(); ctx.arc(bird.x+21,bird.y+8,1.5,0,Math.PI*2); ctx.fill(); ctx.beginPath(); ctx.arc(bird.x+27,bird.y+8,1.5,0,Math.PI*2); ctx.fill(); ctx.save(); ctx.fillStyle='grey'; ctx.translate(bird.x+10,bird.y+5); ctx.rotate(-Math.PI/4); ctx.fillRect(0,0,25,4); ctx.restore(); } },
+            'Pirate': { name: 'Pirate', tier: 'Epic', cost: 200, draw: (ctx,bird) => { skins.Default.draw(ctx, bird); ctx.strokeStyle='black'; ctx.lineWidth=1; ctx.beginPath(); ctx.arc(bird.x+20,bird.y+7,10,.2,Math.PI-.2); ctx.stroke(); ctx.fillStyle='black'; ctx.fillRect(bird.x+22,bird.y+4,8,8); ctx.beginPath(); ctx.moveTo(bird.x+10,bird.y); ctx.lineTo(bird.x+35,bird.y); ctx.lineTo(bird.x+30,bird.y-10); ctx.lineTo(bird.x+15,bird.y-10); ctx.closePath(); ctx.fill(); ctx.fillStyle='white'; ctx.beginPath(); ctx.arc(bird.x+22,bird.y-6,3,0,Math.PI*2); ctx.fill(); } },
+            'Santa': { name: 'Santa Bird', tier: 'Epic', cost: 200, draw: (ctx, bird) => { skins.Default.draw(ctx, bird); ctx.fillStyle = '#e74c3c'; ctx.beginPath(); ctx.moveTo(bird.x + bird.width / 2, bird.y - 15); ctx.lineTo(bird.x, bird.y); ctx.lineTo(bird.x + bird.width, bird.y); ctx.closePath(); ctx.fill(); ctx.fillStyle = 'white'; ctx.fillRect(bird.x - 2, bird.y, bird.width + 4, 4); ctx.beginPath(); ctx.arc(bird.x + bird.width / 2, bird.y - 15, 5, 0, Math.PI * 2); ctx.fill(); } },
+            'Penguin': { name: 'Flappy Penguin', tier: 'Epic', cost: 200, draw: (ctx, bird) => { ctx.fillStyle = 'black'; ctx.fillRect(bird.x, bird.y, bird.width, bird.height); ctx.fillStyle = 'white'; ctx.beginPath(); ctx.ellipse(bird.x + bird.width / 2, bird.y + bird.height/1.5, bird.width/3, bird.height/2, 0, 0, Math.PI*2); ctx.fill(); ctx.fillStyle = '#FFA500'; ctx.beginPath(); ctx.moveTo(bird.x+bird.width,bird.y+bird.height/2 - 4); ctx.lineTo(bird.x+bird.width+10, bird.y+bird.height/2); ctx.lineTo(bird.x+bird.width, bird.y+bird.height/2+4); ctx.closePath(); ctx.fill(); ctx.fillStyle = 'black'; ctx.beginPath(); ctx.arc(bird.x + 12, bird.y + 10, 2, 0, Math.PI * 2); ctx.fill(); ctx.beginPath(); ctx.arc(bird.x + bird.width - 12, bird.y + 10, 2, 0, Math.PI * 2); ctx.fill(); } },
+            'Dragon': { name: 'Dragon', tier: 'Legendary', cost: 500, draw: (ctx,bird) => { ctx.fillStyle='#4A235A'; ctx.fillRect(bird.x,bird.y,bird.width,bird.height); ctx.fillStyle='#8E44AD'; ctx.beginPath(); ctx.moveTo(bird.x+5,bird.y+12); ctx.lineTo(bird.x+20,bird.y+2); ctx.lineTo(bird.x+20,bird.y+22); ctx.closePath(); ctx.fill(); ctx.fillStyle='#F39C12'; ctx.fillRect(bird.x+bird.width,bird.y+8,10,8); ctx.fillStyle='orange'; ctx.beginPath(); ctx.moveTo(bird.x+bird.width+10,bird.y+12); ctx.lineTo(bird.x+bird.width+20,bird.y+8); ctx.lineTo(bird.x+bird.width+20,bird.y+16); ctx.closePath(); ctx.fill(); ctx.fillStyle='red'; ctx.beginPath(); ctx.arc(bird.x+25,bird.y+7,3,0,Math.PI*2); ctx.fill(); } },
+            'Vampire': { name: 'Vampire', tier: 'Legendary', cost: 500, draw: (ctx,bird) => { ctx.fillStyle='black'; ctx.beginPath(); ctx.moveTo(bird.x,bird.y); ctx.lineTo(bird.x-10,bird.y+12); ctx.lineTo(bird.x,bird.y+bird.height); ctx.closePath(); ctx.fill(); skins.Default.draw(ctx, bird); ctx.fillStyle='white'; ctx.beginPath(); ctx.moveTo(bird.x+bird.width,bird.y+16); ctx.lineTo(bird.x+bird.width+5,bird.y+20); ctx.lineTo(bird.x+bird.width,bird.y+20); ctx.fill(); ctx.fillStyle='red'; ctx.beginPath(); ctx.arc(bird.x+25,bird.y+7,3,0,Math.PI*2); ctx.fill(); } },
+            'Alien': { name: 'Alien', tier: 'Legendary', cost: 500, draw: (ctx,bird) => { ctx.fillStyle='#2ecc71'; ctx.beginPath(); ctx.ellipse(bird.x+bird.width/2,bird.y+bird.height/2,20,15,0,0,Math.PI*2); ctx.fill(); ctx.fillStyle='black'; ctx.beginPath(); ctx.ellipse(bird.x+12,bird.y+12,5,8,-.2,0,Math.PI*2); ctx.fill(); ctx.beginPath(); ctx.ellipse(bird.x+28,bird.y+12,5,8,.2,0,Math.PI*2); ctx.fill(); } },
+            'Bat': { name: 'Bat', tier: 'Legendary', cost: 500, draw: (ctx,bird) => { ctx.fillStyle='#34495e'; ctx.beginPath(); ctx.ellipse(bird.x+bird.width/2,bird.y+bird.height/2,bird.width/2,bird.height/2,0,0,Math.PI*2); ctx.fill(); ctx.beginPath(); ctx.moveTo(bird.x+bird.width/2,bird.y+bird.height/2); ctx.lineTo(bird.x-5,bird.y); ctx.lineTo(bird.x+10,bird.y+12); ctx.lineTo(bird.x-5,bird.y+24); ctx.closePath(); ctx.fill(); ctx.fillStyle='red'; ctx.beginPath(); ctx.arc(bird.x+22,bird.y+10,2,0,Math.PI*2); ctx.fill(); } },
+            'King': { name: 'King', tier: 'Legendary', cost: 500, draw: (ctx,bird) => { ctx.fillStyle='#c0392b';ctx.fillRect(bird.x,bird.y,bird.width,bird.height);ctx.fillStyle='#e74c3c';ctx.fillRect(bird.x+5,bird.y+8,15,8);ctx.fillStyle='#d35400';ctx.fillRect(bird.x+bird.width,bird.y+8,10,8);ctx.fillStyle='black';ctx.beginPath();ctx.arc(bird.x+25,bird.y+7,3,0,Math.PI*2);ctx.fill();ctx.fillStyle='#f1c40f';ctx.beginPath();ctx.moveTo(bird.x,bird.y);ctx.lineTo(bird.x+bird.width,bird.y);ctx.lineTo(bird.x+bird.width,bird.y-10);ctx.lineTo(bird.x+bird.width*0.8,bird.y-5);ctx.lineTo(bird.x+bird.width*0.5,bird.y-15);ctx.lineTo(bird.x+bird.width*0.2,bird.y-5);ctx.lineTo(bird.x,bird.y-10);ctx.closePath();ctx.fill();ctx.fillStyle='red';ctx.font='10px Rubik';ctx.fillText('♥',bird.x+8,bird.y+15);} },
+            'Wizard': { name: 'Wizard', tier: 'Legendary', cost: 500, draw: (ctx,bird) => {ctx.fillStyle='#8e44ad';ctx.fillRect(bird.x,bird.y,bird.width,bird.height);ctx.fillStyle='#9b59b6';ctx.fillRect(bird.x+5,bird.y+8,15,8);ctx.fillStyle='#d35400';ctx.fillRect(bird.x+bird.width,bird.y+8,10,8);ctx.fillStyle='white';ctx.beginPath();ctx.arc(bird.x+25,bird.y+7,3,0,Math.PI*2);ctx.fill();ctx.fillStyle='black';ctx.beginPath();ctx.arc(bird.x+25,bird.y+7,1,0,Math.PI*2);ctx.fill();ctx.fillStyle='#2c3e50';ctx.beginPath();ctx.moveTo(bird.x-5,bird.y+5);ctx.lineTo(bird.x+bird.width+5,bird.y+5);ctx.lineTo(bird.x+bird.width/2,bird.y-20);ctx.closePath();ctx.fill();ctx.fillStyle='#34495e';ctx.fillRect(bird.x-5,bird.y+5,bird.width+10,4);} },
+            'Party': { name: 'Party Bird', tier: 'Legendary', cost: 500, draw: (ctx,bird) => {skins.Default.draw(ctx,bird);const colors=['#e74c3c','#f1c40f','#2ecc71','#3498db','#9b59b6'];for(let i=0;i<5;i++){ctx.fillStyle=colors[i];ctx.fillRect(bird.x-10-i*2,bird.y+i*2,5,15-i*4);}ctx.fillStyle=colors[Math.floor(frames/5)%5];ctx.beginPath();ctx.moveTo(bird.x+5,bird.y);ctx.lineTo(bird.x+15,bird.y-15);ctx.lineTo(bird.x+25,bird.y);ctx.closePath();ctx.fill();ctx.fillStyle=colors[Math.floor(frames/5+2)%5];ctx.beginPath();ctx.arc(bird.x+15,bird.y-15,3,0,Math.PI*2);ctx.fill();} },
+            'Toucan': { name: 'Toucan', tier: 'Legendary', cost: 500, draw: (ctx,bird) => {ctx.fillStyle='#2c3e50';ctx.fillRect(bird.x,bird.y,bird.width,bird.height);ctx.fillStyle='white';ctx.beginPath();ctx.ellipse(bird.x+15,bird.y+12,12,10,0,0,2*Math.PI);ctx.fill();ctx.fillStyle='black';ctx.beginPath();ctx.arc(bird.x+25,bird.y+7,3,0,Math.PI*2);ctx.fill();ctx.fillStyle='#e67e22';ctx.beginPath();ctx.moveTo(bird.x+bird.width,bird.y+8);ctx.lineTo(bird.x+bird.width+20,bird.y+4);ctx.lineTo(bird.x+bird.width+20,bird.y+20);ctx.lineTo(bird.x+bird.width,bird.y+16);ctx.closePath();ctx.fill();ctx.fillStyle='#f1c40f';ctx.beginPath();ctx.moveTo(bird.x+bird.width+20,bird.y+4);ctx.lineTo(bird.x+bird.width+25,bird.y+12);ctx.lineTo(bird.x+bird.width+20,bird.y+20);ctx.closePath();ctx.fill();} },
+            'Detective': { name: 'Detective', tier: 'Legendary', cost: 500, draw: (ctx,bird) => {skins.Default.draw(ctx,bird);ctx.fillStyle='#8d6e63';ctx.fillRect(bird.x-5,bird.y+2,bird.width+10,8);ctx.fillRect(bird.x+5,bird.y-5,bird.width-10,7);ctx.fillStyle='white';ctx.fillRect(bird.x+bird.width+8,bird.y+12,8,2);} },
+            'Sailor': { name: 'Sailor', tier: 'Legendary', cost: 500, draw: (ctx,bird) => {ctx.fillStyle='white';ctx.fillRect(bird.x,bird.y,bird.width,bird.height);ctx.strokeStyle='black';ctx.strokeRect(bird.x,bird.y,bird.width,bird.height);ctx.fillStyle='#bdc3c7';ctx.fillRect(bird.x+5,bird.y+8,15,8);ctx.fillStyle='black';ctx.beginPath();ctx.arc(bird.x+25,bird.y+7,3,0,Math.PI*2);ctx.fill();ctx.fillStyle='#e74c3c';ctx.beginPath();ctx.moveTo(bird.x+8,bird.y+bird.height);ctx.lineTo(bird.x+2,bird.y+bird.height+5);ctx.lineTo(bird.x+10,bird.y+bird.height+5);ctx.closePath();ctx.fill();ctx.fillStyle='white';ctx.fillRect(bird.x+5,bird.y-8,bird.width-10,8);ctx.fillRect(bird.x+2,bird.y-4,bird.width-4,4);ctx.strokeStyle='black';ctx.strokeRect(bird.x+5,bird.y-8,bird.width-10,8);ctx.strokeRect(bird.x+2,bird.y-4,bird.width-4,4);} },
+        };
+
+        // --- TRAIL DEFINITIONS ---
+        const trails = {
+            'Rainbow Trail': {
+                name: 'Rainbow Trail',
+                cost: 0, 
+                draw: function(ctx, bird) {
+                    if(bird.trail.length < 2) return;
+                    ctx.save();
+                    for (let i = 1; i < bird.trail.length; i++) {
+                        const segment = bird.trail[i];
+                        const prevSegment = bird.trail[i-1];
+                        const alpha = segment.life / 60; 
+                        const color = `hsla(${ (frames * 7 + i * 12) % 360 }, 100%, 60%, ${alpha})`;
+                        
+                        ctx.strokeStyle = color;
+                        ctx.lineWidth = 12; 
+                        ctx.lineCap = 'round';
+                        ctx.beginPath();
+                        ctx.moveTo(prevSegment.x, prevSegment.y);
+                        ctx.lineTo(segment.x, segment.y);
+                        ctx.stroke();
+
+                        const sideColor1 = `hsla(${ (frames * 7 + i * 12 + 25) % 360 }, 100%, 60%, ${alpha * 0.7})`;
+                        const sideColor2 = `hsla(${ (frames * 7 + i * 12 - 25) % 360 }, 100%, 60%, ${alpha * 0.7})`;
+                        
+                        ctx.lineWidth = 4;
+                        ctx.strokeStyle = sideColor1;
+                        ctx.beginPath();
+                        ctx.moveTo(prevSegment.x + 6, prevSegment.y + 6);
+                        ctx.lineTo(segment.x + 6, segment.y + 6);
+                        ctx.stroke();
+
+                        ctx.strokeStyle = sideColor2;
+                        ctx.beginPath();
+                        ctx.moveTo(prevSegment.x - 6, prevSegment.y - 6);
+                        ctx.lineTo(segment.x - 6, segment.y - 6);
+                        ctx.stroke();
+                    }
+                    ctx.restore();
+                }
+            },
+            'Fire Trail': {
+                name: 'Fire Trail',
+                cost: 0,
+                draw: function(ctx, bird) {
+                    ctx.save();
+                    bird.trail.forEach(p => {
+                        const alpha = p.life / 60;
+                        const size = 12 * alpha * (Math.random() * 0.4 + 0.8);
+                        const colorRand = Math.random();
+                        let color;
+                        if (colorRand > 0.66) {
+                            color = `rgba(255, 100, 0, ${alpha * 0.8})`; // Orange
+                        } else if (colorRand > 0.33) {
+                            color = `rgba(255, 200, 0, ${alpha * 0.8})`; // Yellow
+                        } else {
+                            color = `rgba(255, 0, 0, ${alpha * 0.8})`; // Red
+                        }
+                        ctx.fillStyle = color;
+                        ctx.beginPath();
+                        ctx.arc(p.x, p.y + (Math.random() - 0.5) * 5, size, 0, Math.PI * 2);
+                        ctx.fill();
+                    });
+                    ctx.restore();
+                }
+            },
+            'Bubble Trail': {
+                name: 'Bubble Trail',
+                cost: 0,
+                draw: function(ctx, bird) {
+                    ctx.save();
+                    bird.trail.forEach(p => {
+                        const alpha = p.life / 60;
+                        const size = 10 * alpha * (Math.random() * 0.5 + 0.7);
+                        ctx.strokeStyle = `rgba(255, 255, 255, ${alpha * 0.7})`;
+                        ctx.fillStyle = `rgba(173, 216, 230, ${alpha * 0.3})`;
+                        ctx.lineWidth = 2;
+                        ctx.beginPath();
+                        ctx.arc(p.x, p.y, size, 0, Math.PI * 2);
+                        ctx.fill();
+                        ctx.stroke();
+                    });
+                    ctx.restore();
+                }
+            },
+            'Star Trail': {
+                name: 'Star Trail',
+                cost: 0,
+                draw: function(ctx, bird) {
+                    ctx.save();
+                    bird.trail.forEach(p => {
+                        const alpha = p.life / 60;
+                        const size = 12 * alpha;
+                        const rotation = (p.life / 15) % (Math.PI * 2);
+                        ctx.fillStyle = `rgba(255, 255, 100, ${alpha})`;
+                        ctx.strokeStyle = `rgba(255, 255, 255, ${alpha * 0.5})`;
+                        ctx.lineWidth = 2;
+                        ctx.translate(p.x, p.y);
+                        ctx.rotate(rotation);
+                        ctx.beginPath();
+                        for (let i = 0; i < 5; i++) {
+                            ctx.lineTo(Math.cos(i * 2 * Math.PI / 5) * size, Math.sin(i * 2 * Math.PI / 5) * size);
+                            ctx.lineTo(Math.cos((i + 0.5) * 2 * Math.PI / 5) * size / 2, Math.sin((i + 0.5) * 2 * Math.PI / 5) * size / 2);
+                        }
+                        ctx.closePath();
+                        ctx.fill();
+                        ctx.stroke();
+                        ctx.rotate(-rotation);
+                        ctx.translate(-p.x, -p.y);
+                    });
+                    ctx.restore();
+                }
+            }
+        };
+
+        // --- SAVE/LOAD FUNCTIONS ---
+        function saveGame() {
+            const gameStateToSave = {
+                totalCoins, totalDiamonds, battlePassXP, unlockedSkins,
+                claimedTiers, hasBattlePassPlus, claimedPlusTiers,
+                currentSkinName, abilityPoints, unlockedAbilities, equippedAbility, unlockedTrails, equippedTrail,
+                lastMissionDate, dailyMission, missionProgress,
+                unlockedWorlds, lastSpinTime
+            };
+            localStorage.setItem('flappyBirdSaveData', JSON.stringify(gameStateToSave));
+        }
+
+        function loadGame() {
+            const savedState = localStorage.getItem('flappyBirdSaveData');
+            if (savedState) {
+                const loadedState = JSON.parse(savedState);
+                totalCoins = loadedState.totalCoins !== undefined ? loadedState.totalCoins : 0;
+                totalDiamonds = loadedState.totalDiamonds !== undefined ? loadedState.totalDiamonds : 0;
+                abilityPoints = loadedState.abilityPoints || 0;
+                battlePassXP = loadedState.battlePassXP || 0;
+                unlockedSkins = loadedState.unlockedSkins || ['Default'];
+                unlockedAbilities = loadedState.unlockedAbilities || [];
+                equippedAbility = loadedState.equippedAbility || null;
+                unlockedTrails = loadedState.unlockedTrails || [];
+                equippedTrail = loadedState.equippedTrail || null;
+                claimedTiers = loadedState.claimedTiers || [];
+                hasBattlePassPlus = loadedState.hasBattlePassPlus || false;
+                claimedPlusTiers = loadedState.claimedPlusTiers || [];
+                currentSkinName = loadedState.currentSkinName || 'Default';
+                lastMissionDate = loadedState.lastMissionDate;
+                dailyMission = loadedState.dailyMission;
+                missionProgress = loadedState.missionProgress;
+                unlockedWorlds = loadedState.unlockedWorlds || [0, 1, 2, 3];
+                lastSpinTime = loadedState.lastSpinTime || 0;
+            } else {
+                // Default values for a new player
+                totalCoins = 20; totalDiamonds = 10; abilityPoints = 0; battlePassXP = 0;
+                unlockedSkins = ['Default']; unlockedAbilities = []; equippedAbility = null;
+                unlockedTrails = []; equippedTrail = null;
+                claimedTiers = []; hasBattlePassPlus = false;
+                claimedPlusTiers = []; currentSkinName = 'Default';
+                unlockedWorlds = [0, 1, 2, 3];
+                lastSpinTime = 0;
+            }
+            
+            // Daily Mission Logic
+            const today = new Date().toDateString();
+            if (lastMissionDate !== today || !dailyMission) {
+                const dayOfYear = Math.floor((new Date() - new Date(new Date().getFullYear(), 0, 0)) / 1000 / 60 / 60 / 24);
+                dailyMission = missions[dayOfYear % missions.length];
+                missionProgress = { current: 0, claimed: false };
+                lastMissionDate = today;
+            }
+
+            currentSkin = skins[currentSkinName] || skins.Default;
+            checkBattlePassLevelUp();
+        }
+
+
+        // --- GAME OBJECT CONSTRUCTORS ---
+        function Bird(options = {}) {
+            const { isBot = false, isPlayer2 = false, difficulty = 'medium' } = options;
+            
+            this.width = (equippedAbility === 'slim_profile' && !isBot && !isPlayer2) ? 24 : 34;
+            this.maxPowerUps = 1;
+            
+            this.height = 24;
+            this.x = canvas1.width / 4 - this.width / 2;
+            this.y = canvas1.height/2; 
+            this.velocity = 0; this.velocityX = 0;
+            this.isBot = isBot; this.isPlayer2 = isPlayer2;
+            this.difficulty = difficulty;
+            this.trail = [];
+            if (isBot) { 
+                this.skin = { draw: (ctx, bird) => { ctx.fillStyle='#c0392b'; ctx.fillRect(bird.x,bird.y,bird.width,bird.height); } };
+            }
+            else if (isPlayer2) { this.skin = skins.Robot; }
+            else { this.skin = currentSkin; }
+            this.isGhost = false; this.ghostTimer = 0; this.hasShield = false; this.isDefeated = false;
+            this.isFrozen = false; this.freezeTimer = 0;
+            this.windEffect = 0; this.windTimer = 0;
+            this.isMagnetActive = false; this.magnetTimer = 0;
+            this.abilityCooldown = 0;
+            this.isBlooped = false;
+            this.bloopTimer = 0;
+            this.bloopSplats = [];
+            this.canSwap = false;
+            this.swapFlashTimer = 0;
+            this.isReversed = false;
+            this.reverseTimer = 0;
+            this.isReversing = false;
+            this.reversalCountdown = 0;
+            this.heldPowerUps = [];
+            this.health = 100;
+            this.maxHealth = 100;
+            this.shootCooldown = 0;
+
+
+            this.draw = function(ctx, canvas) {
+                // Call the correct trail drawing function
+                if (equippedTrail && trails[equippedTrail] && !this.isPlayer2 && !this.isBot) {
+                    trails[equippedTrail].draw(ctx, this);
+                }
+
+                if(this.isDefeated) { ctx.globalAlpha = 0.5; }
+                ctx.save();
+                if (this.isGhost && this.ghostTimer < 120 && this.ghostTimer > 0) { if (Math.floor(this.ghostTimer / 10) % 2 === 0) { ctx.restore(); return; } }
+                if (this.isGhost) { ctx.globalAlpha = 0.6; ctx.fillStyle = 'white'; ctx.beginPath(); ctx.arc(this.x + this.width / 2, this.y + this.height / 2, 25, 0, Math.PI * 2); ctx.fill(); }
+                this.skin.draw(ctx, this);
+                if (this.isFrozen) {
+                    ctx.fillStyle = 'rgba(173, 216, 230, 0.7)';
+                    ctx.fillRect(this.x - 5, this.y - 5, this.width + 10, this.height + 10);
+                }
+                if (this.windTimer > 0) {
+                    ctx.strokeStyle = 'rgba(255, 255, 255, 0.7)';
+                    ctx.lineWidth = 2;
+                    for(let i = 0; i < 3; i++) {
+                        ctx.beginPath();
+                        ctx.moveTo(this.x - 10 + Math.random() * 5, this.y + i * 10);
+                        ctx.bezierCurveTo(this.x, this.y + i * 10 + 10, this.x + this.width + 10, this.y + i * 10 - 10, this.x + this.width + 15 + Math.random() * 5, this.y + i * 10);
+                        ctx.stroke();
+                    }
+                }
+                if (this.isMagnetActive) {
+                    const magnetRadius = 40 + Math.sin(frames * 0.1) * 5;
+                    ctx.strokeStyle = `rgba(74, 123, 255, ${0.5 + Math.sin(frames * 0.1) * 0.2})`;
+                    ctx.lineWidth = 3;
+                    ctx.beginPath();
+                    ctx.arc(this.x + this.width / 2, this.y + this.height / 2, magnetRadius, 0, Math.PI * 2);
+                    ctx.stroke();
+                }
+                ctx.restore();
+                if(this.hasShield) { ctx.strokeStyle = '#00BFFF'; ctx.lineWidth = 3; ctx.beginPath(); ctx.arc(this.x + this.width / 2, this.y + this.height / 2, 28, 0, Math.PI * 2); ctx.stroke(); }
+                if(this.isDefeated) { ctx.globalAlpha = 1; }
+            }
+            this.update = function(canvas) {
+                if(this.isDefeated) return;
+                if (this.freezeTimer > 0) { this.freezeTimer--; return; }
+
+                if (gameState === STATES.PLAYING || gameState === STATES.BOSS_BATTLE) {
+                    this.velocity += this.isReversed ? -gravity : gravity;
+                }
+                
+                if (this.windTimer > 0) { this.windTimer--; }
+                if (this.magnetTimer > 0) { this.magnetTimer--; if(this.magnetTimer <= 0) this.isMagnetActive = false; }
+                if (this.abilityCooldown > 0) this.abilityCooldown -= 1/60;
+                if (this.shootCooldown > 0) this.shootCooldown--;
+                
+                if(this.bloopTimer > 0) {
+                    this.bloopTimer--;
+                    if(this.bloopTimer <= 0) {
+                        this.isBlooped = false;
+                        this.bloopSplats = [];
+                    }
+                }
+
+                if (this.isReversing) {
+                    this.reversalCountdown--;
+                    if (this.reversalCountdown <= 0) {
+                        this.isReversing = false;
+                        this.isReversed = true;
+                        this.reverseTimer = 420; // 7 seconds
+                    }
+                }
+
+                if (this.reverseTimer > 0) {
+                    this.reverseTimer--;
+                    if(this.reverseTimer <= 0) {
+                        this.isReversed = false;
+                    }
+                }
+
+                if (this.swapFlashTimer > 0) this.swapFlashTimer--;
+
+                this.y += this.velocity;
+                this.x += this.velocityX;
+                if (this.y < 0) { this.y = 0; this.velocity = 0; }
+                if (this.x < 0) { this.x = 0; }
+                if (this.x + this.width > canvas.width) { this.x = canvas.width - this.width; }
+                if(this.isGhost) { this.ghostTimer--; if(this.ghostTimer <= 0) this.isGhost = false; }
+                if (this.isBot) { this.decide(); }
+
+                if (equippedTrail && !this.isPlayer2 && !this.isBot) {
+                    this.trail.push({x: this.x + this.width / 2, y: this.y + this.height / 2,
+                    life: 60 }); // Trail particles last for 1 second now
+                }
+                this.trail = this.trail.filter(p => p.life > 0);
+                this.trail.forEach(p => p.life--);
+
+            }
+            this.flap = function() {
+                if(!this.isDefeated && this.freezeTimer <= 0) {
+                    this.velocity = this.isReversed ? -lift : lift;
+                    
+                    if(gameState === STATES.START) {
+                        gameState = STATES.PLAYING;
+                    }
+                }
+            }
+            this.shoot = function() {
+                if (this.shootCooldown <= 0) {
+                    playerProjectiles.push(new PlayerProjectile(this.x + this.width, this.y + this.height / 2));
+                    this.shootCooldown = 30; // 0.5 second cooldown
+                }
+            }
+            this.decide = function() { 
+                if (gameState !== STATES.PLAYING) return;
+            
+                // Priority 1: Handle Projectiles
+                if (projectiles.length > 0) {
+                    let closestX = Infinity;
+                    projectiles.forEach(p => {
+                        if (p.x + p.width > this.x && p.x < closestX) {
+                            closestX = p.x;
+                        }
+                    });
+            
+                    if (closestX !== Infinity) {
+                        const wall = projectiles.filter(p => p.x === closestX);
+                        
+                        let gapTop = 0;
+                        let gapBottom = canvas1.height;
+            
+                        const topWall = wall.filter(p => p.y < canvas1.height / 2);
+                        if (topWall.length > 0) {
+                            gapTop = Math.max(...topWall.map(p => p.y + p.height));
+                        }
+            
+                        const bottomWall = wall.filter(p => p.y > canvas1.height / 2);
+                        if (bottomWall.length > 0) {
+                            gapBottom = Math.min(...bottomWall.map(p => p.y));
+                        }
+                        
+                        const gapCenter = gapTop + (gapBottom - gapTop) / 2;
+            
+                        if (this.y > gapCenter) {
+                            this.flap();
+                        }
+                        return; 
+                    }
+                }
+            
+                // Priority 2: Handle Pipes (existing logic)
+                let nextPipe = null;
+                for (const pipe of pipes) { if (pipe.x + pipe.width > this.x && pipe.isTop) { nextPipe = pipe; break; } }
+            
+                if (nextPipe) {
+                    if (this.heldPowerUps.length > 0) {
+                        const powerUp = this.heldPowerUps[0];
+                        const willCrash = this.y + this.height > nextPipe.y + pipeGap || this.y < nextPipe.y + nextPipe.height;
+                        
+                        if (willCrash && (powerUp === 'shield' || powerUp === 'ghost' || powerUp === 'tnt')) {
+                            activatePowerUp(this, player1);
+                        }
+                    }
+            
+                    const gapCenter = nextPipe.y + nextPipe.height + pipeGap / 2;
+                    let aimOffset = 0;
+                    let reactionChance = 0.05;
+            
+                    switch(this.difficulty) {
+                        case 'easy':
+                            aimOffset = (Math.random() - 0.5) * (pipeGap / 2);
+                            reactionChance = 0.1;
+                            break;
+                        case 'medium':
+                            aimOffset = (Math.random() - 0.5) * (pipeGap / 3);
+                            reactionChance = 0.05;
+                            break;
+                        case 'hard':
+                            aimOffset = (Math.random() - 0.5) * (pipeGap / 5);
+                            reactionChance = 0.02;
+                            break;
+                    }
+            
+                    const targetY = gapCenter + aimOffset;
+            
+                    if (this.isReversed) {
+                        if (this.y < targetY && Math.random() > reactionChance * 1.5) { this.flap(); }
+                    } else {
+                        if (this.y > targetY && Math.random() > reactionChance) { this.flap(); }
+                    }
+                } else { // Priority 3: Default behavior
+                    if (!this.isReversed && this.y > canvas1.height / 2) {
+                        this.flap();
+                    } else if (this.isReversed && this.y < canvas1.height / 2) {
+                        this.flap();
+                    }
+                }
+            }
+        }
+        function Pipe(x,y,h,isTop, type){ this.x=x;this.y=y;this.width=pipeWidth;this.height=h;this.isTop=isTop; this.type=type; this.vy=type==='moving'?(Math.random()>.5?0.7:-0.7):0; this.initialY=y;this.moveRange=30;this.p1_passed=false;this.p2_passed=false;this.bot_passed=false;this.isDestroyed=false;this.draw=function(ctx){if(this.isDestroyed)return;ctx.fillStyle='#008000';ctx.fillRect(this.x,this.y,this.width,this.height);const a=25;if(this.isTop){ctx.fillRect(this.x-2,this.y+this.height-a,this.width+4,a)}else{ctx.fillRect(this.x-2,this.y,this.width+4,a)}};this.update=function(){this.x-=1.5;if(this.type==='moving'){this.y+=this.vy;if(this.y<this.initialY-this.moveRange||this.y>this.initialY+this.moveRange){this.vy*=-1}}}}
+        function PowerUp(x,y,type){this.x=x;this.y=y;this.type=type;this.width=30;this.height=30;this.draw=function(ctx){ctx.font='bold 20px Rubik';ctx.textAlign='center';ctx.textBaseline='middle';if('tnt'===this.type){ctx.fillStyle='red';ctx.fillRect(this.x,this.y,this.width,this.height);ctx.fillStyle='white';ctx.fillText('💣',this.x+this.width/2,this.y+this.height/2)}else if('ghost'===this.type){ctx.fillStyle='white';ctx.fillRect(this.x,this.y,this.width,this.height);ctx.fillText('👻',this.x+this.width/2,this.y+this.height/2+2)}else if('shield'===this.type){ctx.fillStyle='deepskyblue';ctx.fillRect(this.x,this.y,this.width,this.height);ctx.fillText('🛡️',this.x+this.width/2,this.y+this.height/2)}else if('freeze'===this.type){ctx.fillStyle='cyan';ctx.fillRect(this.x,this.y,this.width,this.height);ctx.fillText('❄️',this.x+this.width/2,this.y+this.height/2)}else if('wind'===this.type){ctx.fillStyle='lightgrey';ctx.fillRect(this.x,this.y,this.width,this.height);ctx.fillText('🌪️',this.x+this.width/2,this.y+this.height/2)}};this.update=function(){this.x-=1.5}}
+        function Coin(x, y) { this.x=x;this.y=y;this.width=20;this.height=20;this.draw=function(ctx){ctx.fillStyle='#FFD700';ctx.strokeStyle='#DAA520';ctx.lineWidth=2;ctx.beginPath();ctx.arc(this.x+this.width/2,this.y+this.height/2,this.width/2,0,Math.PI*2);ctx.fill();ctx.stroke();ctx.fillStyle='#DAA520';ctx.font='bold 12px Rubik';ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillText('$',this.x+this.width/2,this.y+this.height/2+1)};this.update=function(bird){this.x-=1.5; if(bird && bird.isMagnetActive){const dx=bird.x+bird.width/2-this.x;const dy=bird.y+bird.height/2-this.y;const dist=Math.sqrt(dx*dx+dy*dy);this.x+=dx/dist*3;this.y+=dy/dist*3;}}}
+        function Diamond(x,y){this.x=x;this.y=y;this.width=22;this.height=22;this.draw=function(ctx){ctx.save();ctx.fillStyle='#8e44ad';ctx.strokeStyle='#ecf0f1';ctx.lineWidth=2;ctx.beginPath();ctx.moveTo(this.x+this.width/2,this.y);ctx.lineTo(this.x+this.width,this.y+this.height/2);ctx.lineTo(this.x+this.width/2,this.y+this.height);ctx.lineTo(this.x,this.y+this.height/2);ctx.closePath();ctx.fill();ctx.stroke();ctx.restore()};this.update=function(bird){this.x-=1.5; if(bird && bird.isMagnetActive){const dx=bird.x+bird.width/2-this.x;const dy=bird.y+bird.height/2-this.y;const dist=Math.sqrt(dx*dx+dy*dy);this.x+=dx/dist*3;this.y+=dy/dist*3;}}}
+        function Rock(x, y) {
+            this.x = x;
+            this.y = y;
+            this.width = 40;
+            this.height = 30;
+            this.speed = 2.5;
+            this.draw = function(ctx) {
+                ctx.fillStyle = '#616161';
+                ctx.strokeStyle = '#424242';
+                ctx.lineWidth = 2;
+                ctx.beginPath();
+                ctx.moveTo(this.x, this.y + this.height / 2);
+                ctx.lineTo(this.x + this.width * 0.2, this.y);
+                ctx.lineTo(this.x + this.width * 0.8, this.y);
+                ctx.lineTo(this.x + this.width, this.y + this.height / 2);
+                ctx.lineTo(this.x + this.width * 0.7, this.y + this.height);
+                ctx.lineTo(this.x + this.width * 0.3, this.y + this.height);
+                ctx.closePath();
+                ctx.fill();
+                ctx.stroke();
+            };
+            this.update = function() {
+                this.x -= this.speed;
+            };
+        }
+        function PlayerProjectile(x, y) {
+            this.x = x;
+            this.y = y;
+            this.width = 10;
+            this.height = 5;
+            this.speed = 7;
+            this.draw = function(ctx) {
+                ctx.fillStyle = 'yellow';
+                ctx.fillRect(this.x, this.y, this.width, this.height);
+            };
+            this.update = function() {
+                this.x += this.speed;
+            };
+        }
+        function Boss() {
+            this.x = canvas1.width - 120;
+            this.y = canvas1.height / 2 - 50;
+            this.width = 100;
+            this.height = 100;
+            this.health = 100;
+            this.maxHealth = 100;
+            this.projectiles = [];
+            this.attackCooldown = 0;
+            this.vy = 2;
+            this.draw = function(ctx) {
+                ctx.fillStyle = 'purple';
+                ctx.fillRect(this.x, this.y, this.width, this.height);
+                ctx.fillStyle = 'red';
+                ctx.fillRect(this.x + 20, this.y + 20, 20, 20);
+                ctx.fillRect(this.x + 60, this.y + 20, 20, 20);
+            };
+            this.update = function() {
+                this.y += this.vy;
+                if (this.y <= 0 || this.y + this.height >= canvas1.height) {
+                    this.vy *= -1;
+                }
+
+                if (this.attackCooldown <= 0) {
+                    this.projectiles.push(new Rock(this.x, this.y + this.height / 2));
+                    this.attackCooldown = 120; // 2 seconds
+                } else {
+                    this.attackCooldown--;
+                }
+
+                this.projectiles.forEach(p => p.update());
+                this.projectiles = this.projectiles.filter(p => p.x + p.width > 0);
+            };
+        }
+        
+        const buttons = {
+            solo: { x: menuCanvas.width / 2 - 85, y: 265, w: 170, h: 35, text: 'Single Player' },
+            bot: { x: menuCanvas.width / 2 - 85, y: 310, w: 170, h: 35, text: 'Bot Battle' },
+            pvp: { x: menuCanvas.width / 2 - 85, y: 355, w: 170, h: 35, text: 'Two Players' },
+            customization: { x: 20, y: 405, w: 170, h: 35, text: 'Customization' },
+            shop: { x: 210, y: 405, w: 170, h: 35, text: 'Shop' },
+            battlePass: { x: menuCanvas.width / 2 - 85, y: 450, w: 170, h: 35, text: 'Battle Pass' },
+            back: { x: menuCanvas.width / 2 - 50, y: 435, w: 100, h: 40, text: 'Back' },
+            easy: { x: menuCanvas.width / 2 - 75, y: 150, w: 150, h: 50, text: 'Easy' },
+            medium: { x: menuCanvas.width / 2 - 75, y: 220, w: 150, h: 50, text: 'Medium' },
+            hard: { x: menuCanvas.width / 2 - 75, y: 290, w: 150, h: 50, text: 'Hard' },
+            claimMission: { x: 20, y: 175, w: 100, h: 30, text: 'Claim Reward' },
+            worlds: { x: menuCanvas.width / 2 - 85, y: 220, w: 170, h: 35, text: 'Worlds' },
+            buyBattlePass: { x: 20, y: 200, w: 120, h: 80 },
+            skins: { x: menuCanvas.width / 2 - 75, y: 150, w: 150, h: 50, text: 'Skins' },
+            abilities: { x: menuCanvas.width / 2 - 75, y: 220, w: 150, h: 50, text: 'Abilities' },
+            cosmetics: { x: menuCanvas.width / 2 - 75, y: 290, w: 150, h: 50, text: 'Cosmetics' },
+            spinWheel: { x: menuCanvas.width / 2 - 60, y: 380, w: 120, h: 50, text: 'Spin!' }
+        };
+
+        function drawButton(ctx, btn, disabled = false, selected = false) { 
+            if (selected) {
+                ctx.fillStyle = '#2980b9';
+            } else {
+                ctx.fillStyle= disabled ? '#95a5a6' : '#3498db';
+            }
+            ctx.fillRect(btn.x,btn.y,btn.w,btn.h);
+            ctx.fillStyle='white';ctx.font='18px Rubik';
+            ctx.textAlign='center';
+            ctx.textBaseline='middle';
+            ctx.fillText(btn.text,btn.x+btn.w/2,btn.y+btn.h/2); 
+        }
+        
+        function setup() { 
+            loadGame();
+            gameState = STATES.HOME; 
+            gameLoop(); 
+        }
+        function resetGame(mode, difficulty = 'medium') {
+            gameMode = mode;
+            botDifficulty = difficulty;
+            menuView.style.display = 'none';
+            gameView.style.display = 'flex';
+            gameOverOverlay.style.display = 'none';
+            player1 = new Bird({});
+            player2 = (gameMode === 'pvp') ? new Bird({isPlayer2: true}) : null;
+            bot = (gameMode === 'bot') ? new Bird({isBot: true, difficulty: botDifficulty}) : null;
+            canvas2.style.display = (gameMode === 'pvp') ? 'block' : 'none';
+            if (gameMode !== 'pvp') { canvas1.style.margin = 'auto'; } else { canvas1.style.margin = '0';}
+            pipes = []; powerUps = []; coins = []; diamonds = []; projectiles = []; playerProjectiles = [];
+            
+            p1_score = 0; p2_score = 0; bot_score = 0;
+            coinCount = 0; diamondCount = 0; lastDiamondSpawnScore = -1;
+            frames = 0; 
+            gameState = STATES.START;
+            eventState = 'none';
+            eventTimer = 0;
+            eventBarrages = [];
+            nextEventScore = Math.floor(Math.random() * 5) + 10; // 10-14
+
+            if (dailyMission && dailyMission.type === 'play_games' && !missionProgress.claimed) {
+                missionProgress.current++;
+            }
+        }
+
+        // --- MAIN GAME LOOP ---
+        function gameLoop() {
+            if (gameState === STATES.PLAYING || gameState === STATES.START) { 
+                update(); 
+            } else if (gameState === STATES.SHOP) {
+                updateShop();
+            } else if (gameState === STATES.BOSS_BATTLE) {
+                updateBossBattle();
+            }
+            draw();
+            requestAnimationFrame(gameLoop);
+        }
+
+        function update() {
+            handleInput(); 
+
+            if (player1) player1.update(canvas1);
+            if (player2) player2.update(canvas2);
+            if (bot) bot.update(canvas1);
+
+            if (gameMode === 'pvp' || gameMode === 'bot') {
+                const opponent = player2 || bot;
+                if (player1 && opponent && !player1.isDefeated && !opponent.isDefeated) {
+                    const dx = player1.x - opponent.x;
+                    const dy = player1.y - opponent.y;
+                    const distance = Math.sqrt(dx * dx + dy * dy);
+                    player1.canSwap = distance < 100;
+                    if(player2) player2.canSwap = distance < 100;
+                } else {
+                    if(player1) player1.canSwap = false;
+                    if(player2) player2.canSwap = false;
+                }
+            }
+
+            if (gameState === STATES.PLAYING) {
+                frames++;
+
+                // Event State Machine
+                if (eventState === 'clearing' && pipes.length === 0) {
+                    if (eventBarrages.length > 0) {
+                        eventState = 'pre_warning_pause';
+                        eventTimer = 120; // 2 second pause
+                    } else {
+                        eventState = 'none'; 
+                    }
+                } else if (eventState === 'pre_warning_pause') {
+                    eventTimer--;
+                    if (eventTimer <= 0) {
+                        eventState = 'warning';
+                        eventTimer = 90; // 1.5 second warning
+                    }
+                } else if (eventState === 'warning') {
+                    eventTimer--;
+                    if (eventTimer <= 0) {
+                        eventState = 'active';
+                        const barrageType = eventBarrages.shift(); 
+                        spawnRockWall(barrageType);
+                    }
+                } else if (eventState === 'active' && projectiles.length === 0) {
+                    if (eventBarrages.length > 0) {
+                        eventState = 'pre_warning_pause';
+                        eventTimer = 60; // Shorter pause between barrages
+                    } else {
+                        eventState = 'none'; // All barrages in the sequence are over
+                    }
+                }
+
+                // Pipe Spawning
+                const canSpawnPipes = eventState === 'none';
+                if(canSpawnPipes && frames % 100 === 0){
+                    const topPipeHeight = Math.random()*(canvas1.height-pipeGap-150)+50;
+                    const rand = Math.random();
+                    let type = 'static';
+                    if (rand < 0.15) type = 'moving';
+
+                    const topPipe = new Pipe(canvas1.width, 0, topPipeHeight, true, type);
+                    const bottomPipe = new Pipe(canvas1.width, topPipeHeight + pipeGap, canvas1.height - topPipeHeight - pipeGap, false, type);
+                    if(type === 'moving') { bottomPipe.vy = topPipe.vy; bottomPipe.initialY = bottomPipe.y; }
+
+                    pipes.push(topPipe, bottomPipe);
+                    coins.push(new Coin(canvas1.width+pipeWidth/2-10, topPipeHeight+pipeGap/2-10));
+                    
+                    const scoreToCheck = gameMode === 'pvp' ? Math.max(p1_score, p2_score) : p1_score;
+                    if ((scoreToCheck + 1) % 5 === 0 && (scoreToCheck + 1) !== lastDiamondSpawnScore) {
+                        diamonds.push(new Diamond(canvas1.width + pipeWidth / 2 - 11, topPipeHeight + pipeGap / 2 - 11));
+                        lastDiamondSpawnScore = scoreToCheck + 1;
+                    }
+                }
+                
+                if(canSpawnPipes && frames % 180 === 0){ 
+                    if (Math.random() < 0.4) { 
+                        let powerUpPool;
+                        if (gameMode === 'solo') {
+                            powerUpPool = ['tnt', 'tnt', 'tnt', 'shield', 'ghost'];
+                        } else {
+                            powerUpPool = ['freeze', 'freeze', 'wind', 'wind', 'tnt', 'shield', 'ghost'];
+                        }
+                        
+                        const type = powerUpPool[Math.floor(Math.random() * powerUpPool.length)];
+                        const c = Math.random()*(canvas1.height-200)+100;
+                        powerUps.push(new PowerUp(canvas1.width, c, type));
+                    }
+                }
+                
+                pipes.forEach(p => p.update());
+                powerUps.forEach(p => p.update());
+                coins.forEach(c => c.update(player1 && player1.isMagnetActive ? player1 : (player2 && player2.isMagnetActive ? player2 : null)));
+                diamonds.forEach(d => d.update(player1 && player1.isMagnetActive ? player1 : (player2 && player2.isMagnetActive ? player2 : null)));
+                projectiles.forEach(r => r.update());
+                
+                pipes = pipes.filter(p => p.x + p.width > 0 && !p.isDestroyed);
+                powerUps = powerUps.filter(p => p.x + p.width > 0);
+                coins = coins.filter(c => c.x + c.width > 0);
+                diamonds = diamonds.filter(d => d.x + d.width > 0);
+                projectiles = projectiles.filter(r => r.x + r.width > 0);
+                
+                checkCollisions(); 
+                updateScore();
+            }
+        }
+        
+        function updateShop() {
+            if (isSpinning) {
+                wheelAngle += wheelVelocity;
+                wheelVelocity *= 0.993; // Friction
+
+                if (wheelVelocity < 0.001) {
+                    isSpinning = false;
+                    wheelVelocity = 0;
+                    
+                    const numSlices = wheelPrizes.length;
+                    const sliceAngle = (2 * Math.PI) / numSlices;
+                    
+                    const finalAngle = (wheelAngle % (2 * Math.PI) + 2 * Math.PI) % (2 * Math.PI);
+                    
+                    const pointerAngle = (2 * Math.PI - finalAngle + sliceAngle / 2) % (2 * Math.PI);
+                    
+                    const prizeIndex = Math.floor(pointerAngle / sliceAngle);
+                    
+                    wheelPrize = wheelPrizes[prizeIndex];
+                    grantPrize(wheelPrize);
+                }
+            }
+        }
+
+        // --- DRAWING FUNCTIONS ---
+        function draw() {
+            if (gameState === STATES.HOME) { drawHome(); }
+            else if (gameState === STATES.DIFFICULTY_SELECT) { drawDifficultySelect(); }
+            else if (gameState === STATES.CUSTOMIZATION) { drawCustomization(); }
+            else if (gameState === STATES.SKINS) { drawSkins(); }
+            else if (gameState === STATES.COSMETICS) { drawCosmetics(); }
+            else if (gameState === STATES.ABILITIES_SHOP) { drawAbilitiesShop(); }
+            else if (gameState === STATES.BATTLE_PASS) { drawBattlePass(); }
+            else if (gameState === STATES.REWARD_SHOWCASE) { drawRewardShowcase(); }
+            else if (gameState === STATES.WORLDS) { drawWorlds(); }
+            else if (gameState === STATES.SHOP) { drawShop(); }
+            else if (gameState === STATES.BOSS_BATTLE) { drawBossBattle(); }
+            else {
+                if (gameMode === 'pvp') {
+                    drawInstance(ctx1, canvas1, player1, player2, p1_score, 'Player 1');
+                    drawInstance(ctx2, canvas2, player2, player1, p2_score, 'Player 2');
+                } else {
+                    drawInstance(ctx1, canvas1, player1, bot, p1_score, 'Player 1');
+                }
+            }
+        }
+        
+        function drawHome() {
+            menuView.style.display = 'block'; gameView.style.display = 'none';
+            menuCtx.clearRect(0,0,menuCanvas.width, menuCanvas.height);
+            menuCtx.fillStyle = '#87CEEB';
+            menuCtx.fillRect(0,0,menuCanvas.width, menuCanvas.height);
+            menuCtx.fillStyle='black';menuCtx.textAlign='center';menuCtx.font='36px Rubik';menuCtx.fillText('Flappy Bird',menuCanvas.width/2,40);
+            
+            // Currencies
+            menuCtx.font='20px Rubik';
+            menuCtx.fillText(`💰 ${totalCoins}`, menuCanvas.width/2 - 80, 80);
+            menuCtx.fillText(`💎 ${totalDiamonds}`, menuCanvas.width/2, 80);
+            menuCtx.fillText(`⭐ ${abilityPoints}`, menuCanvas.width/2 + 80, 80);
+
+            // Daily Mission
+            menuCtx.fillStyle = 'rgba(0, 0, 0, 0.1)';
+            menuCtx.fillRect(10, 115, menuCanvas.width - 20, 95);
+            menuCtx.fillStyle = '#333';
+            menuCtx.font = 'bold 16px Rubik';
+            menuCtx.textAlign = 'center';
+            menuCtx.fillText('Daily Mission', menuCanvas.width / 2, 135);
+
+            if (dailyMission) {
+                menuCtx.font = '14px Rubik';
+                menuCtx.fillText(dailyMission.description, menuCanvas.width / 2, 160);
+                
+                // Progress Bar
+                const progress = Math.min(missionProgress.current / dailyMission.target, 1);
+                menuCtx.fillStyle = '#bdc3c7';
+                menuCtx.fillRect(130, 178, 140, 15);
+                menuCtx.fillStyle = '#2ecc71';
+                menuCtx.fillRect(130, 178, 140 * progress, 15);
+                menuCtx.fillStyle = '#333';
+                menuCtx.font = '12px Rubik';
+                menuCtx.fillText(`${missionProgress.current}/${dailyMission.target}`, 200, 189);
+
+                // Claim Button / Status
+                if (progress >= 1 && !missionProgress.claimed) {
+                    drawButton(menuCtx, buttons.claimMission);
+                } else if (missionProgress.claimed) {
+                    menuCtx.fillStyle = '#27ae60';
+                    menuCtx.fillText('Claimed!', 70, 190);
+                } else {
+                    let rewardText = '';
+                    if (dailyMission.reward.type === 'coins') rewardText = `💰 ${dailyMission.reward.value}`;
+                    else if (dailyMission.reward.type === 'diamonds') rewardText = `💎 ${dailyMission.reward.value}`;
+                    else if (dailyMission.reward.type === 'ability_points') rewardText = `⭐ ${dailyMission.reward.value}`;
+                    menuCtx.fillStyle = '#333';
+                    menuCtx.fillText(`Reward: ${rewardText}`, 70, 190);
+                }
+            }
+
+            // Game Mode Buttons
+            drawButton(menuCtx, buttons.worlds);
+            drawButton(menuCtx, buttons.solo);
+            drawButton(menuCtx, buttons.bot);
+            drawButton(menuCtx, buttons.pvp);
+            drawButton(menuCtx, buttons.shop);
+            drawButton(menuCtx, buttons.customization);
+            drawButton(menuCtx, buttons.battlePass);
+        }
+
+        function drawCustomization() {
+            menuView.style.display = 'block'; gameView.style.display = 'none';
+            menuCtx.clearRect(0,0,menuCanvas.width, menuCanvas.height);
+            menuCtx.fillStyle = '#87CEEB';
+            menuCtx.fillRect(0,0,menuCanvas.width, menuCanvas.height);
+            menuCtx.fillStyle = 'black'; menuCtx.textAlign = 'center'; menuCtx.font = '30px Rubik';
+            menuCtx.fillText('Customization', menuCanvas.width / 2, 80);
+
+            drawButton(menuCtx, buttons.skins);
+            drawButton(menuCtx, buttons.abilities);
+            drawButton(menuCtx, buttons.cosmetics);
+            const backButton = { ...buttons.back, y: 360 };
+            drawButton(menuCtx, backButton);
+        }
+
+        function drawShop() {
+            menuView.style.display = 'block';
+            gameView.style.display = 'none';
+            menuCtx.clearRect(0, 0, menuCanvas.width, menuCanvas.height);
+            menuCtx.fillStyle = '#2c3e50';
+            menuCtx.fillRect(0, 0, menuCanvas.width, menuCanvas.height);
+
+            menuCtx.fillStyle = 'white';
+            menuCtx.textAlign = 'center';
+            menuCtx.font = '30px Rubik';
+            menuCtx.fillText('Prize Wheel', menuCanvas.width / 2, 40);
+
+            // Draw Wheel
+            const centerX = menuCanvas.width / 2;
+            const centerY = 220;
+            const radius = 150;
+            const sliceAngle = (2 * Math.PI) / wheelPrizes.length;
+
+            menuCtx.save();
+            menuCtx.translate(centerX, centerY);
+            menuCtx.rotate(wheelAngle);
+
+            wheelPrizes.forEach((prize, i) => {
+                const startAngle = -sliceAngle / 2;
+                const endAngle = sliceAngle / 2;
+
+                menuCtx.save();
+                menuCtx.rotate(i * sliceAngle);
+
+                menuCtx.fillStyle = prize.color;
+                menuCtx.beginPath();
+                menuCtx.moveTo(0, 0);
+                menuCtx.arc(0, 0, radius, startAngle, endAngle);
+                menuCtx.closePath();
+                menuCtx.fill();
+
+                // Draw prize text
+                menuCtx.textAlign = 'center';
+                menuCtx.textBaseline = 'middle';
+                menuCtx.fillStyle = 'white';
+                menuCtx.font = 'bold 12px Rubik';
+                
+                let prizeText = '';
+                if (prize.type === 'coins') prizeText = `💰 ${prize.value}`;
+                else if (prize.type === 'diamonds') prizeText = `💎 ${prize.value}`;
+                else if (prize.type === 'ability_points') prizeText = `⭐ ${prize.value}`;
+                else if (prize.type === 'skin') prizeText = prize.value;
+                
+                menuCtx.save();
+                menuCtx.rotate(Math.PI / 2); // Rotate text to be horizontal
+                menuCtx.fillText(prizeText, 0, -radius * 0.65);
+                menuCtx.restore();
+
+                menuCtx.restore();
+            });
+            menuCtx.restore();
+
+            // Draw pointer
+            menuCtx.fillStyle = 'red';
+            menuCtx.beginPath();
+            menuCtx.moveTo(centerX + radius + 20, centerY - 10); // Top-right of base
+            menuCtx.lineTo(centerX + radius + 20, centerY + 10); // Bottom-right of base
+            menuCtx.lineTo(centerX + radius, centerY); // Tip
+            menuCtx.closePath();
+            menuCtx.fill();
+
+            const canSpin = canSpinWheel();
+            drawButton(menuCtx, buttons.spinWheel, !canSpin || isSpinning);
+
+            if (!canSpin && !isSpinning) {
+                const twelveHoursInMillis = 12 * 60 * 60 * 1000;
+                const now = new Date().getTime();
+                const timeRemaining = lastSpinTime + twelveHoursInMillis - now;
+                
+                const hours = Math.floor(timeRemaining / (1000 * 60 * 60));
+                const minutes = Math.floor((timeRemaining % (1000 * 60 * 60)) / (1000 * 60));
+                const seconds = Math.floor((timeRemaining % (1000 * 60)) / 1000);
+
+                const timerText = `Next spin in: ${hours}h ${minutes}m ${seconds}s`;
+                menuCtx.fillStyle = 'white';
+                menuCtx.font = '14px Rubik';
+                menuCtx.fillText(timerText, menuCanvas.width / 2, 365);
+            }
+
+            drawButton(menuCtx, buttons.back);
+        }
+
+        function drawDifficultySelect() {
+            menuView.style.display = 'block'; gameView.style.display = 'none';
+            menuCtx.clearRect(0,0,menuCanvas.width, menuCanvas.height);
+            menuCtx.fillStyle = '#87CEEB';
+            menuCtx.fillRect(0,0,menuCanvas.width, menuCanvas.height);
+            menuCtx.fillStyle = 'black'; menuCtx.textAlign = 'center'; menuCtx.font = '30px Rubik';
+            menuCtx.fillText('Select Difficulty', menuCanvas.width / 2, 80);
+
+            drawButton(menuCtx, buttons.easy);
+            drawButton(menuCtx, buttons.medium);
+            drawButton(menuCtx, buttons.hard);
+            const backButton = { ...buttons.back, y: 360 };
+            drawButton(menuCtx, backButton);
+        }
+
+        function drawSkins() {
+            menuView.style.display = 'block';
+            gameView.style.display = 'none';
+            menuCtx.clearRect(0, 0, menuCanvas.width, menuCanvas.height);
+            menuCtx.fillStyle = '#87CEEB';
+            menuCtx.fillRect(0, 0, menuCanvas.width, menuCanvas.height);
+            
+            menuCtx.save();
+            menuCtx.translate(0, -skinsScrollY);
+
+            menuCtx.fillStyle = 'black';
+            menuCtx.textAlign = 'center';
+            menuCtx.font = '30px Rubik';
+            menuCtx.fillText('Skins Shop', menuCanvas.width / 2, 40 + skinsScrollY);
+
+            const skinTiers = {
+                'Common': { name: 'Common', color: '#7f8c8d' },
+                'Rare': { name: 'Rare', color: '#3498db' },
+                'Epic': { name: 'Epic', color: '#9b59b6' },
+                'Legendary': { name: 'Legendary', color: '#f1c40f' }
+            };
+
+            const cols = 4;
+            const itemSize = 40;
+            const hPadding = 20;
+            const itemSpacing = (menuCanvas.width - 2 * hPadding - cols * itemSize) / (cols - 1);
+            let currentY = 80;
+
+            for (const tier in skinTiers) {
+                const tierSkins = Object.values(skins).filter(s => s.tier === tier);
+                if (tierSkins.length === 0) continue;
+
+                menuCtx.fillStyle = skinTiers[tier].color;
+                menuCtx.font = 'bold 20px Rubik';
+                menuCtx.textAlign = 'right';
+                menuCtx.fillText(skinTiers[tier].name, menuCanvas.width - 20, currentY);
+                currentY += 30;
+
+                tierSkins.forEach((skin, i) => {
+                    const col = i % cols;
+                    const row = Math.floor(i / cols);
+                    const x = hPadding + col * (itemSize + itemSpacing) + itemSize / 2;
+                    const y = currentY + row * (itemSize + 60);
+
+                    const isUnlocked = unlockedSkins.includes(skin.name);
+                    menuCtx.globalAlpha = isUnlocked ? 1.0 : 0.5;
+
+                    menuCtx.strokeStyle = (currentSkinName === skin.name && isUnlocked) ? '#f39c12' : '#333';
+                    menuCtx.lineWidth = 3;
+                    menuCtx.strokeRect(x - itemSize / 2, y - itemSize / 2, itemSize, itemSize);
+                    skin.draw(menuCtx, { x: x - 17, y: y - 12, width: 34, height: 24 });
+                    
+                    menuCtx.fillStyle = 'black';
+                    menuCtx.font = '10px Rubik';
+                    menuCtx.textAlign = 'center';
+                    menuCtx.fillText(skin.name, x, y + 35);
+
+                    if (!isUnlocked) {
+                        menuCtx.font = 'bold 10px Rubik';
+                        menuCtx.fillStyle = '#e67e22';
+                        menuCtx.fillText(`💰${skin.cost}`, x, y + 50);
+                    }
+                    
+                    menuCtx.globalAlpha = 1.0;
+                });
+                currentY += Math.ceil(tierSkins.length / cols) * 80;
+            }
+            
+            maxScrollY = Math.max(0, currentY - menuCanvas.height + 60);
+            menuCtx.restore();
+            
+            if (maxScrollY > 0) {
+                const scrollbarHeight = menuCanvas.height * (menuCanvas.height / currentY);
+                const scrollbarY = (skinsScrollY / maxScrollY) * (menuCanvas.height - scrollbarHeight);
+                menuCtx.fillStyle = 'rgba(0, 0, 0, 0.2)';
+                menuCtx.fillRect(menuCanvas.width - 10, 0, 8, menuCanvas.height);
+                menuCtx.fillStyle = 'rgba(0, 0, 0, 0.5)';
+                menuCtx.fillRect(menuCanvas.width - 10, scrollbarY, 8, scrollbarHeight);
+            }
+
+            drawButton(menuCtx, buttons.back, false);
+        }
+
+        function drawCosmetics() {
+            menuView.style.display = 'block'; gameView.style.display = 'none';
+            menuCtx.clearRect(0,0,menuCanvas.width, menuCanvas.height);
+            menuCtx.fillStyle = '#87CEEB';
+            menuCtx.fillRect(0,0,menuCanvas.width, menuCanvas.height);
+            menuCtx.fillStyle = 'black'; menuCtx.textAlign = 'center'; menuCtx.font = '30px Rubik';
+            menuCtx.fillText('Cosmetics', menuCanvas.width / 2, 40);
+
+            // Draw Trails
+            menuCtx.font = 'bold 20px Rubik';
+            menuCtx.textAlign = 'right';
+            menuCtx.fillText('Trails:', menuCanvas.width - 20, 80);
+
+            let yPos = 110;
+            Object.values(trails).forEach(trail => {
+                const trailBtn = { x: 20, y: yPos, w: 150, h: 40, text: trail.name };
+                const isUnlocked = true; // All trails are free
+                const isEquipped = equippedTrail === trail.name;
+                
+                drawButton(menuCtx, trailBtn, false, isEquipped);
+                
+                yPos += 50;
+            });
+            
+            drawButton(menuCtx, { ...buttons.back, y: 360 });
+        }
+        
+        function drawAbilitiesShop() {
+            menuView.style.display = 'block'; gameView.style.display = 'none';
+            menuCtx.clearRect(0,0,menuCanvas.width, menuCanvas.height);
+            menuCtx.fillStyle = '#34495e';
+            menuCtx.fillRect(0,0,menuCanvas.width, menuCanvas.height);
+            
+            // Draw fixed title
+            menuCtx.fillStyle = 'white'; menuCtx.textAlign = 'center'; menuCtx.font = '30px Rubik';
+            menuCtx.fillText('Abilities Shop', menuCanvas.width / 2, 40);
+
+            // Save context for scrolling
+            menuCtx.save();
+            menuCtx.translate(0, -abilitiesScrollY);
+
+            let yPos = 80;
+            const itemHeight = 90;
+
+            for (const key in permanentAbilities) {
+                const ability = permanentAbilities[key];
+                const isUnlocked = unlockedAbilities.includes(key);
+
+                menuCtx.fillStyle = 'rgba(255, 255, 255, 0.1)';
+                menuCtx.fillRect(10, yPos, menuCanvas.width - 20, 80);
+
+                menuCtx.fillStyle = 'white';
+                menuCtx.textAlign = 'left';
+                menuCtx.font = 'bold 18px Rubik';
+                menuCtx.fillText(ability.name, 25, yPos + 25);
+                
+                menuCtx.font = '12px Rubik';
+                menuCtx.fillText(ability.description, 25, yPos + 45);
+
+                if (isUnlocked) {
+                    const isEquipped = equippedAbility === key;
+                    const selectBtn = { x: menuCanvas.width - 110, y: yPos + 20, w: 90, h: 40, text: isEquipped ? 'Equipped' : 'Equip' };
+                    drawButton(menuCtx, selectBtn, false, isEquipped);
+                } else {
+                    const canAfford = true; // Abilities are free
+                    const buyBtn = { x: menuCanvas.width - 110, y: yPos + 20, w: 90, h: 40, text: 'Buy' };
+                    drawButton(menuCtx, buyBtn, !canAfford);
+                    menuCtx.textAlign = 'center';
+                    menuCtx.font = '12px Rubik';
+                    menuCtx.fillStyle = 'white';
+                    menuCtx.fillText(`Cost: Free!`, buyBtn.x + buyBtn.w / 2, yPos + 70);
+                }
+
+                yPos += itemHeight;
+            }
+            
+            const totalContentHeight = yPos;
+            maxAbilitiesScrollY = Math.max(0, totalContentHeight - menuCanvas.height + 60);
+
+            menuCtx.restore(); // Restore context after drawing scrollable items
+
+            // Draw scrollbar
+            if (maxAbilitiesScrollY > 0) {
+                const scrollbarVisibleHeight = menuCanvas.height;
+                const scrollbarHeight = scrollbarVisibleHeight * (scrollbarVisibleHeight / totalContentHeight);
+                const scrollbarY = (abilitiesScrollY / maxAbilitiesScrollY) * (scrollbarVisibleHeight - scrollbarHeight);
+                menuCtx.fillStyle = 'rgba(255, 255, 255, 0.2)';
+                menuCtx.fillRect(menuCanvas.width - 10, 0, 8, menuCanvas.height);
+                menuCtx.fillStyle = 'rgba(255, 255, 255, 0.5)';
+                menuCtx.fillRect(menuCanvas.width - 10, scrollbarY, 8, scrollbarHeight);
+            }
+
+            drawButton(menuCtx, buttons.back);
+        }
+
+        // --- NEW BATTLE PASS FUNCTION ---
+        function drawBattlePass() {
+            menuView.style.display = 'block';
+            gameView.style.display = 'none';
+            
+            // Background
+            const bgGrad = menuCtx.createLinearGradient(0, 0, 0, menuCanvas.height);
+            bgGrad.addColorStop(0, '#4a148c');
+            bgGrad.addColorStop(1, '#2c3e50');
+            menuCtx.fillStyle = bgGrad;
+            menuCtx.fillRect(0, 0, menuCanvas.width, menuCanvas.height);
+
+            // --- Fixed Top Bar ---
+            menuCtx.fillStyle = 'rgba(0,0,0,0.3)';
+            menuCtx.fillRect(0,0, menuCanvas.width, 80);
+            menuCtx.fillStyle = 'white';
+            menuCtx.font = '24px Rubik';
+            menuCtx.textAlign = 'center';
+            menuCtx.fillText('Battle Pass', menuCanvas.width / 2, 30);
+            drawButton(menuCtx, {...buttons.back, x: 10, y: 15, w: 80, h: 30});
+
+
+            // --- Scrollable Content ---
+            menuCtx.save();
+            menuCtx.translate(0, -battlePassScrollY);
+
+            const tierHeight = 120;
+            const tierSpacing = 20;
+            const buyPanelHeight = 140;
+            const totalTiers = Math.max(battlePassTiers.length, battlePassPlusTiers.length);
+            let contentHeight = totalTiers * (tierHeight + tierSpacing);
+            let startY = 100;
+            
+            if (!hasBattlePassPlus) {
+                contentHeight += buyPanelHeight + tierSpacing;
+                
+                // Draw "Buy Pass" Panel
+                menuCtx.fillStyle = '#0077be';
+                menuCtx.fillRect(20, startY, menuCanvas.width - 40, buyPanelHeight);
+                menuCtx.strokeStyle = 'white';
+                menuCtx.strokeRect(20, startY, menuCanvas.width - 40, buyPanelHeight);
+                
+                menuCtx.fillStyle = 'white';
+                menuCtx.font = 'bold 20px Rubik';
+                menuCtx.textAlign = 'center';
+                menuCtx.fillText('Buy Battle Pass +', menuCanvas.width / 2, startY + 30);
+                menuCtx.font = '14px Rubik';
+                menuCtx.fillText('Get extra rewards on the left track!', menuCanvas.width / 2, startY + 60);
+                drawButton(menuCtx, {...buttons.buyBattlePass, x: menuCanvas.width/2 - 50, y: startY + 90, w: 100, h: 40, text: 'Buy Now' });
+                
+                startY += buyPanelHeight + tierSpacing;
+            }
+            
+            maxBattlePassScrollY = contentHeight - menuCanvas.height + 100;
+
+            const xRight = menuCanvas.width - 130;
+            const xLeft = 30;
+
+            // Draw connecting lines
+            menuCtx.strokeStyle = 'rgba(255, 255, 255, 0.3)';
+            menuCtx.lineWidth = 8;
+            menuCtx.beginPath();
+            menuCtx.moveTo(xLeft + 50, startY);
+            menuCtx.lineTo(xLeft + 50, startY + totalTiers * (tierHeight + tierSpacing));
+            menuCtx.stroke();
+            menuCtx.beginPath();
+            menuCtx.moveTo(xRight + 50, startY);
+            menuCtx.lineTo(xRight + 50, startY + totalTiers * (tierHeight + tierSpacing));
+            menuCtx.stroke();
+
+
+            // Draw Tiers
+            for(let i = 0; i < totalTiers; i++) {
+                const tierY = startY + i * (tierHeight + tierSpacing);
+                
+                // Draw Plus Tier (Left)
+                const plusTier = battlePassPlusTiers[i];
+                if (plusTier) {
+                    drawRewardBox(menuCtx, plusTier, xLeft, tierY, 'plus');
+                }
+
+                // Draw Regular Tier (Right)
+                const regularTier = battlePassTiers[i];
+                if(regularTier) {
+                    drawRewardBox(menuCtx, regularTier, xRight, tierY, 'regular');
+                }
+            }
+
+            menuCtx.restore();
+        }
+
+        function drawRewardBox(ctx, tier, x, y, type) {
+            const isUnlocked = battlePassXP >= tier.xpRequired;
+            const isClaimed = type === 'plus' ? claimedPlusTiers.includes(tier.level) : claimedTiers.includes(tier.level);
+            const canClaim = isUnlocked && !isClaimed && (type === 'regular' || hasBattlePassPlus);
+
+            // Box Style
+            ctx.save();
+            if (canClaim) {
+                ctx.fillStyle = '#f1c40f'; // Gold for claimable
+                ctx.shadowColor = 'yellow';
+                ctx.shadowBlur = 15;
+            } else if (isUnlocked) {
+                ctx.fillStyle = hasBattlePassPlus || type === 'regular' ? '#27ae60' : '#603575'; // Green for unlocked, dark purple for unowned plus
+            } else {
+                ctx.fillStyle = '#423853'; // Dark purple for locked
+            }
+
+            ctx.fillRect(x, y, 100, 100);
+            ctx.shadowBlur = 0;
+
+            // Border
+            ctx.strokeStyle = 'rgba(255,255,255,0.7)';
+            ctx.lineWidth = 2;
+            ctx.strokeRect(x, y, 100, 100);
+
+            // Draw Reward Icon
+            const reward = tier.reward;
+            if (reward.type === 'coins') {
+                ctx.font = '40px Rubik'; ctx.fillStyle = 'gold'; ctx.fillText('💰', x + 50, y + 40);
+                ctx.font = '14px Rubik'; ctx.fillStyle = 'white'; ctx.fillText(reward.value, x + 50, y + 70);
+            } else if (reward.type === 'diamonds') {
+                ctx.font = '40px Rubik'; ctx.fillStyle = 'cyan'; ctx.fillText('💎', x + 50, y + 40);
+                ctx.font = '14px Rubik'; ctx.fillStyle = 'white'; ctx.fillText(reward.value, x + 50, y + 70);
+            } else if (reward.type === 'ability_points') {
+                ctx.font = '40px Rubik'; ctx.fillStyle = 'yellow'; ctx.fillText('⭐', x + 50, y + 40);
+                ctx.font = '14px Rubik'; ctx.fillStyle = 'white'; ctx.fillText(reward.value, x + 50, y + 70);
+            } else if (reward.type === 'skin' && skins[reward.value]) {
+                skins[reward.value].draw(ctx, { x: x + 25, y: y + 20, width: 50, height: 40 });
+                ctx.font = '10px Rubik'; ctx.fillStyle = 'white'; ctx.fillText(reward.value, x + 50, y + 70);
+            } else if (reward.type === 'trail' && trails[reward.value]) {
+                ctx.font = '14px Rubik'; ctx.fillStyle = 'white'; ctx.fillText(reward.value, x + 50, y + 50);
+            }
+
+            // XP required label
+            ctx.fillStyle = 'rgba(0,0,0,0.5)';
+            ctx.fillRect(x, y+85, 100, 15);
+            ctx.fillStyle = 'white';
+            ctx.font = '10px Rubik';
+            ctx.fillText(`XP ${tier.xpRequired}`, x + 50, y + 93);
+            
+            // Claimed Checkmark
+            if (isClaimed) {
+                ctx.fillStyle = 'rgba(0,0,0,0.6)';
+                ctx.fillRect(x, y, 100, 100);
+                ctx.fillStyle = '#2ecc71';
+                ctx.font = 'bold 60px Rubik';
+                ctx.fillText('✓', x + 50, y + 60);
+            } else if (!isUnlocked && (type==='plus' && !hasBattlePassPlus)) {
+                ctx.fillStyle = 'rgba(0,0,0,0.6)';
+                ctx.fillRect(x, y, 100, 100);
+            }
+            ctx.restore();
+        }
+        
+        function drawRewardShowcase() {
+            menuCtx.fillStyle = 'rgba(0, 0, 0, 0.85)';
+            menuCtx.fillRect(0, 0, menuCanvas.width, menuCanvas.height);
+            menuCtx.textAlign = 'center';
+            menuCtx.fillStyle = 'white';
+            if (!rewardToShowcase) return;
+
+            if (rewardToShowcase.type === 'skin') {
+                const skin = skins[rewardToShowcase.value];
+                if (skin) {
+                    menuCtx.font = '30px Rubik'; menuCtx.fillText('New Skin!', menuCanvas.width / 2, 100);
+                    skin.draw(menuCtx, { x: menuCanvas.width / 2 - 51, y: menuCanvas.height / 2 - 72, width: 102, height: 72 });
+                    menuCtx.font = '24px Rubik'; menuCtx.fillText(rewardToShowcase.value, menuCanvas.width / 2, menuCanvas.height / 2 + 50);
+                }
+            } else if (rewardToShowcase.type === 'coins') {
+                menuCtx.font = '120px Rubik'; menuCtx.fillText('💰', menuCanvas.width / 2, menuCanvas.height / 2 - 20);
+                menuCtx.font = '40px Rubik'; menuCtx.fillText(`+${rewardToShowcase.value}`, menuCanvas.width / 2, menuCanvas.height / 2 + 60);
+            } else if (rewardToShowcase.type === 'diamonds') {
+                menuCtx.font = '120px Rubik'; menuCtx.fillText('💎', menuCanvas.width / 2, menuCanvas.height / 2 - 20);
+                menuCtx.font = '40px Rubik'; menuCtx.fillText(`+${rewardToShowcase.value}`, menuCanvas.width / 2, menuCanvas.height / 2 + 60);
+            } else if (rewardToShowcase.type === 'ability_points') {
+                menuCtx.font = '120px Rubik'; menuCtx.fillText('⭐', menuCanvas.width / 2, menuCanvas.height / 2 - 20);
+                menuCtx.font = '40px Rubik'; menuCtx.fillText(`+${rewardToShowcase.value}`, menuCanvas.width / 2, menuCanvas.height / 2 + 60);
+            } else if (rewardToShowcase.type === 'trail') {
+                menuCtx.font = '30px Rubik'; menuCtx.fillText('New Trail!', menuCanvas.width / 2, 100);
+                menuCtx.font = '24px Rubik'; menuCtx.fillText(rewardToShowcase.value, menuCanvas.width / 2, menuCanvas.height / 2 + 50);
+            }
+
+            menuCtx.font = '18px Rubik';
+            menuCtx.fillText('Click to continue', menuCanvas.width / 2, menuCanvas.height - 50);
+        }
+
+        function drawJungleWorld(ctx, world, isUnlocked) {
+            const { x, y } = world;
+            ctx.save();
+            ctx.beginPath();
+            ctx.arc(x, y, 60, 0, Math.PI * 2);
+            ctx.clip();
+
+            // Background
+            const jungleGrad = ctx.createLinearGradient(x-60, y-60, x+60, y+60);
+            jungleGrad.addColorStop(0, '#296238');
+            jungleGrad.addColorStop(1, '#1A4314');
+            ctx.fillStyle = isUnlocked ? jungleGrad : '#7f8c8d';
+            ctx.fillRect(x-60, y-60, 120, 120);
+
+            if (isUnlocked) {
+                // Background trees (darker)
+                ctx.fillStyle = '#1B5E20';
+                for(let i = 0; i < 5; i++) {
+                    const tx = x - 50 + i * 25 + (Math.random() - 0.5) * 10;
+                    const th = 40 + Math.random() * 30;
+                    ctx.fillRect(tx, y + 60 - th, 8, th);
+                }
+
+                // Foreground trees (lighter)
+                ctx.fillStyle = '#388E3C';
+                ctx.fillRect(x - 30, y + 20, 15, 40);
+                ctx.fillRect(x + 20, y + 15, 12, 45);
+
+                // Tangled Vines
+                ctx.strokeStyle = '#556B2F';
+                ctx.lineWidth = 3;
+                ctx.beginPath();
+                ctx.moveTo(x - 50, y - 40);
+                ctx.bezierCurveTo(x - 20, y, x + 10, y - 50, x + 40, y - 10);
+                ctx.stroke();
+                ctx.beginPath();
+                ctx.moveTo(x + 50, y - 30);
+                ctx.bezierCurveTo(x, y, x - 40, y + 50, x - 20, y + 60);
+                ctx.stroke();
+
+                // Leafy canopy
+                ctx.fillStyle = '#66BB6A';
+                ctx.beginPath();
+                ctx.arc(x - 25, y + 20, 25, Math.PI, Math.PI * 2);
+                ctx.fill();
+                ctx.fillStyle = '#4CAF50';
+                ctx.beginPath();
+                ctx.arc(x + 25, y + 15, 30, 0, Math.PI * 2);
+                ctx.fill();
+            }
+            ctx.restore();
+        }
+
+        function drawVolcanoWorld(ctx, world, isUnlocked) {
+            const { x, y } = world;
+            ctx.save();
+            ctx.beginPath();
+            ctx.arc(x, y, 60, 0, Math.PI * 2);
+            ctx.clip();
+
+            // Background
+            const volcanoGrad = ctx.createLinearGradient(x, y-60, x, y+60);
+            volcanoGrad.addColorStop(0, '#E9572B');
+            volcanoGrad.addColorStop(1, '#3E2723');
+            ctx.fillStyle = isUnlocked ? volcanoGrad : '#7f8c8d';
+            ctx.fillRect(x-60, y-60, 120, 120);
+
+            if (isUnlocked) {
+                // Volcano cone
+                ctx.fillStyle = '#4E342E';
+                ctx.beginPath();
+                ctx.moveTo(x - 55, y + 60);
+                ctx.lineTo(x, y - 20);
+                ctx.lineTo(x + 55, y + 60);
+                ctx.closePath();
+                ctx.fill();
+
+                // Lava Eruption
+                const eruptionY = y - 20;
+                ctx.fillStyle = '#FF7043'; // light orange
+                ctx.beginPath();
+                ctx.moveTo(x, eruptionY);
+                ctx.bezierCurveTo(x-20, eruptionY-40, x+20, eruptionY-40, x, eruptionY);
+                ctx.fill();
+                ctx.fillStyle = '#FFEB3B'; // yellow
+                ctx.beginPath();
+                ctx.arc(x, eruptionY-15, 10, 0, Math.PI*2);
+                ctx.fill();
+
+                // Smoke
+                for(let i=0; i<10; i++) {
+                    ctx.fillStyle = `rgba(80, 80, 80, ${Math.random() * 0.5 + 0.2})`;
+                    ctx.beginPath();
+                    ctx.arc(x + (Math.random()-0.5)*40, y - 50 - Math.random()*20, Math.random()*15 + 5, 0, Math.PI*2);
+                    ctx.fill();
+                }
+
+                // Lava flows
+                ctx.strokeStyle = '#EF6C00';
+                ctx.lineWidth = 5;
+                ctx.beginPath();
+                ctx.moveTo(x, y-18);
+                ctx.quadraticCurveTo(x+10, y+10, x+20, y+60);
+                ctx.stroke();
+                ctx.strokeStyle = '#FDD835';
+                ctx.lineWidth = 2;
+                ctx.stroke();
+            }
+            ctx.restore();
+        }
+        
+        function drawFrozenFortressWorld(ctx, world, isUnlocked) {
+            const { x, y } = world;
+            ctx.save();
+            ctx.beginPath();
+            ctx.arc(x, y, 60, 0, Math.PI * 2);
+            ctx.clip();
+
+            // Background
+            const iceGrad = ctx.createLinearGradient(x - 60, y - 60, x + 60, y + 60);
+            iceGrad.addColorStop(0, '#B3E5FC');
+            iceGrad.addColorStop(1, '#4FC3F7');
+            ctx.fillStyle = isUnlocked ? iceGrad : '#7f8c8d';
+            ctx.fillRect(x - 60, y - 60, 120, 120);
+
+            if (isUnlocked) {
+                // Ice Spikes
+                ctx.fillStyle = '#E1F5FE';
+                for (let i = 0; i < 7; i++) {
+                    ctx.beginPath();
+                    ctx.moveTo(x - 60 + i * 20, y + 60);
+                    ctx.lineTo(x - 50 + i * 20, y + 60);
+                    ctx.lineTo(x - 55 + i * 20, y + 30 + Math.random() * 20);
+                    ctx.closePath();
+                    ctx.fill();
+                }
+                
+                // Fortress Towers
+                ctx.fillStyle = '#81D4FA';
+                ctx.fillRect(x - 30, y - 10, 20, 70);
+                ctx.fillRect(x + 10, y - 10, 20, 70);
+                
+                // Fortress Top
+                ctx.fillStyle = '#29B6F6';
+                ctx.beginPath();
+                ctx.moveTo(x - 35, y - 10);
+                ctx.lineTo(x + 35, y - 10);
+                ctx.lineTo(x, y - 40);
+                ctx.closePath();
+                ctx.fill();
+                
+                // Snowflakes
+                for(let i=0; i<15; i++) {
+                    ctx.fillStyle = `rgba(255, 255, 255, ${Math.random() * 0.8 + 0.2})`;
+                    ctx.beginPath();
+                    ctx.arc(x + (Math.random()-0.5)*100, y + (Math.random()-0.5)*100, Math.random()*2 + 1, 0, Math.PI*2);
+                    ctx.fill();
+                }
+            }
+            ctx.restore();
+        }
+
+        function drawDeepSpaceWorld(ctx, world, isUnlocked) {
+            const { x, y } = world;
+            ctx.save();
+            ctx.beginPath();
+            ctx.arc(x, y, 60, 0, Math.PI * 2);
+            ctx.clip();
+
+            // Background
+            const spaceGrad = ctx.createRadialGradient(x, y, 10, x, y, 60);
+            spaceGrad.addColorStop(0, '#4A148C');
+            spaceGrad.addColorStop(1, '#000000');
+            ctx.fillStyle = isUnlocked ? spaceGrad : '#7f8c8d';
+            ctx.fillRect(x - 60, y - 60, 120, 120);
+
+            if (isUnlocked) {
+                // Stars
+                for(let i=0; i<50; i++) {
+                    ctx.fillStyle = `rgba(255, 255, 255, ${Math.random() * 0.9 + 0.1})`;
+                    ctx.beginPath();
+                    ctx.arc(x + (Math.random()-0.5)*120, y + (Math.random()-0.5)*120, Math.random()*1.5, 0, Math.PI*2);
+                    ctx.fill();
+                }
+
+                // Planet
+                const planetX = x + 20;
+                const planetY = y - 20;
+                const planetGrad = ctx.createRadialGradient(planetX-5, planetY-5, 2, planetX, planetY, 25);
+                planetGrad.addColorStop(0, '#FDD835');
+                planetGrad.addColorStop(1, '#F57F17');
+                ctx.fillStyle = planetGrad;
+                ctx.beginPath();
+                ctx.arc(planetX, planetY, 25, 0, Math.PI*2);
+                ctx.fill();
+                
+                // Planet Ring
+                ctx.strokeStyle = '#FBC02D';
+                ctx.lineWidth = 4;
+                ctx.beginPath();
+                ctx.ellipse(planetX, planetY, 35, 10, -0.3, 0, Math.PI * 2);
+                ctx.stroke();
+                
+                // Floating Asteroid
+                ctx.fillStyle = '#795548';
+                ctx.beginPath();
+                ctx.moveTo(x-40, y+30);
+                ctx.lineTo(x-25, y+20);
+                ctx.lineTo(x-15, y+35);
+                ctx.lineTo(x-30, y+45);
+                ctx.closePath();
+                ctx.fill();
+            }
+            ctx.restore();
+        }
+
+
+        function drawWorlds() {
+            menuView.style.display = 'block'; gameView.style.display = 'none';
+            menuCtx.clearRect(0,0,menuCanvas.width, menuCanvas.height);
+            // Updated background for the worlds screen
+            const bgGrad = menuCtx.createLinearGradient(0,0,0,menuCanvas.height);
+            bgGrad.addColorStop(0, '#2c3e50');
+            bgGrad.addColorStop(1, '#3498db');
+            menuCtx.fillStyle = bgGrad;
+            menuCtx.fillRect(0,0,menuCanvas.width, menuCanvas.height);
+            
+            menuCtx.save();
+            menuCtx.translate(-mapScrollX, 0);
+
+            // Draw path
+            menuCtx.strokeStyle = 'rgba(255, 255, 255, 0.4)';
+            menuCtx.lineWidth = 15;
+            menuCtx.setLineDash([20, 15]);
+            menuCtx.beginPath();
+            menuCtx.moveTo(-100, 240);
+            menuCtx.lineTo(1200, 240);
+            menuCtx.stroke();
+            menuCtx.setLineDash([]);
+            
+            // Draw worlds definitions
+            const worlds = [
+                { name: 'Jungle Arena', x: 200, y: 240, color: '#1A5D1A' },
+                { name: 'Lava Peak', x: 500, y: 240, color: '#D21312' },
+                { name: 'Frozen Fortress', x: 800, y: 240, color: '#A7D2CB' },
+                { name: 'Deep Space', x: 1100, y: 240, color: '#27374D' }
+            ];
+
+            worlds.forEach((world, index) => {
+                const isUnlocked = unlockedWorlds.includes(index);
+
+                // Draw the world icon based on its index
+                if (index === 0) {
+                    drawJungleWorld(menuCtx, world, isUnlocked);
+                } else if (index === 1) {
+                    drawVolcanoWorld(menuCtx, world, isUnlocked);
+                } else if (index === 2) {
+                    drawFrozenFortressWorld(menuCtx, world, isUnlocked);
+                } else if (index === 3) {
+                    drawDeepSpaceWorld(menuCtx, world, isUnlocked);
+                }
+
+                // Draw border
+                menuCtx.strokeStyle = 'rgba(255, 255, 255, 0.8)';
+                menuCtx.lineWidth = 4;
+                menuCtx.beginPath();
+                menuCtx.arc(world.x, world.y, 60, 0, Math.PI * 2);
+                menuCtx.stroke();
+                
+                // Draw text labels
+                menuCtx.fillStyle = 'white';
+                menuCtx.shadowColor = 'black';
+                menuCtx.shadowBlur = 5;
+                menuCtx.font = 'bold 18px Rubik';
+                menuCtx.textAlign = 'center';
+                menuCtx.fillText(world.name, world.x, world.y - 15);
+                
+                if (isUnlocked) {
+                    menuCtx.font = '14px Rubik';
+                    menuCtx.fillText('Enter', world.x, world.y + 15);
+                } else {
+                    menuCtx.font = '14px Rubik';
+                    menuCtx.fillText('Locked', world.x, world.y + 15);
+                }
+                menuCtx.shadowBlur = 0; // reset shadow
+
+                if (currentWorldIndex === index) {
+                    menuCtx.fillStyle = '#f1c40f';
+                    menuCtx.font = '12px Rubik';
+                    menuCtx.fillText('▼ You Are Here ▼', world.x, world.y - 80);
+                }
+            });
+            
+            maxMapScrollX = worlds[worlds.length - 1].x - menuCanvas.width + 100;
+
+            menuCtx.restore();
+            drawButton(menuCtx, { ...buttons.back, y: 420 });
+        }
+
+        function drawPowerUpIcon(ctx, type, x, y) {
+            ctx.font = 'bold 30px Rubik'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+            const w=30, h=30;
+            if (type === 'tnt') { ctx.fillStyle = 'red'; ctx.fillRect(x, y, w, h); ctx.fillStyle = 'white'; ctx.fillText('💣', x + w / 2, y + h / 2); }
+            else if (type === 'ghost') { ctx.fillStyle = 'white'; ctx.fillRect(x, y, w, h); ctx.fillText('👻', x + w / 2, y + h / 2 + 2); }
+            else if (type === 'shield') { ctx.fillStyle = 'deepskyblue'; ctx.fillRect(x, y, w, h); ctx.fillText('🛡️', x + w / 2, y + h / 2); }
+            else if (type === 'freeze') { ctx.fillStyle = 'cyan'; ctx.fillRect(x, y, w, h); ctx.fillText('❄️', x + w / 2, y + h / 2); }
+            else if (type === 'wind') { ctx.fillStyle = 'lightgrey'; ctx.fillRect(x, y, w, h); ctx.fillText('🌪️', x + w / 2, y + h / 2); }
+        }
+
+        function drawInstance(ctx, canvas, player, opponent, score, playerLabel = '') {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            ctx.fillStyle = '#87CEEB'; ctx.fillRect(0, 0, canvas.width, canvas.height);
+            
+            for(const pipe of pipes) pipe.draw(ctx);
+            for(const powerUp of powerUps) powerUp.draw(ctx);
+            for(const coin of coins) coin.draw(ctx);
+            for(const diamond of diamonds) diamond.draw(ctx);
+            for(const rock of projectiles) rock.draw(ctx);
+            
+            if (opponent) { ctx.save(); ctx.globalAlpha = 0.5; opponent.draw(ctx, canvas); ctx.restore(); }
+            if(player) {
+                if (equippedAbility === 'swap_positions') {
+                    ctx.save();
+                    const canUseSwap = player.canSwap && player.abilityCooldown <= 0;
+                    ctx.strokeStyle = canUseSwap ? 'rgba(46, 204, 113, 0.8)' : 'rgba(255, 255, 255, 0.3)';
+                    ctx.lineWidth = 2;
+                    ctx.setLineDash([5, 5]);
+                    ctx.beginPath();
+                    ctx.arc(player.x + player.width / 2, player.y + player.height / 2, 100, 0, Math.PI * 2);
+                    ctx.stroke();
+                    ctx.restore();
+                }
+                player.draw(ctx, canvas);
+            }
+
+            ctx.fillStyle='#D2B48C';ctx.fillRect(0,canvas.height-20,canvas.width,20);ctx.fillStyle='#006400';ctx.fillRect(0,canvas.height-20,canvas.width,5);
+            
+            if (eventState === 'warning') {
+                ctx.fillStyle = 'red';
+                ctx.font = 'bold 40px Rubik';
+                ctx.textAlign = 'center';
+                
+                const upcomingBarrageType = eventBarrages[0];
+
+                if (upcomingBarrageType === 'bottom' || upcomingBarrageType === 'middle_gap') {
+                    for (let i = canvas.height / 2; i < canvas.height - 20; i += 40) {
+                        if (Math.floor(eventTimer / 10) % 2 === 0) {
+                            ctx.fillText('!', canvas.width - 20, i);
+                        }
+                    }
+                }
+                if (upcomingBarrageType === 'top' || upcomingBarrageType === 'middle_gap') {
+                    for (let i = 40; i < canvas.height / 2; i += 40) {
+                        if (Math.floor(eventTimer / 10) % 2 === 0) {
+                            ctx.fillText('!', canvas.width - 20, i);
+                        }
+                    }
+                }
+            }
+
+            if (player) {
+                if (player.isBlooped) {
+                    player.bloopSplats.forEach(splat => {
+                        ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
+                        ctx.beginPath();
+                        ctx.arc(splat.x, splat.y, splat.radius, 0, Math.PI * 2);
+                        ctx.fill();
+                    });
+                }
+                
+                if (player.swapFlashTimer > 0) {
+                    ctx.fillStyle = `rgba(255, 255, 255, ${player.swapFlashTimer / 30})`;
+                    ctx.fillRect(0, 0, canvas.width, canvas.height);
+                }
+                
+                if (player.isReversing) {
+                    const countdown = Math.ceil(player.reversalCountdown / 60);
+                    ctx.save();
+                    ctx.fillStyle = 'rgba(255, 0, 0, 0.5)';
+                    ctx.font = 'bold 100px Rubik';
+                    ctx.textAlign = 'center';
+                    ctx.textBaseline = 'middle';
+                    ctx.strokeStyle = 'black';
+                    ctx.lineWidth = 5;
+                    ctx.strokeText(countdown, canvas.width / 2, canvas.height / 2);
+                    ctx.fillText(countdown, canvas.width / 2, canvas.height / 2);
+                    ctx.font = 'bold 30px Rubik';
+                    ctx.strokeText('Controls Reversed!', canvas.width / 2, canvas.height / 2 - 80);
+                    ctx.fillText('Controls Reversed!', canvas.width / 2, canvas.height / 2 - 80);
+                    ctx.restore();
+                }
+
+                // Draw power-up slots
+                for (let i = 0; i < player.maxPowerUps; i++) {
+                    const slotX = canvas.width - 45 - (i * 45);
+                    const slotY = 10;
+                    ctx.fillStyle = 'rgba(0, 0, 0, 0.2)';
+                    ctx.strokeStyle = 'white'; ctx.lineWidth = 2;
+                    ctx.fillRect(slotX, slotY, 40, 40);
+                    ctx.strokeRect(slotX, slotY, 40, 40);
+                    if (player.heldPowerUps[i]) {
+                        drawPowerUpIcon(ctx, player.heldPowerUps[i], slotX + 5, slotY + 5);
+                    }
+                }
+                // Draw Equipped Ability UI
+                if (equippedAbility && permanentAbilities[equippedAbility].type === 'active' && unlockedAbilities.includes(equippedAbility) && !player.isPlayer2) {
+                    ctx.font = '30px Rubik';
+                    ctx.textAlign = 'center';
+                    
+                    let abilityIcon;
+                    let abilityColor;
+                    const abilityKey = player.isPlayer2 ? 'Ctrl' : 'F';
+                    const abilityX = 30;
+                    const abilityCooldown = player.abilityCooldown;
+                    
+                    switch(equippedAbility) {
+                        case 'coin_magnet':
+                            abilityIcon = '🧲';
+                            abilityColor = 'slateblue';
+                            break;
+                        case 'blooper':
+                            abilityIcon = '🦑';
+                            abilityColor = '#2c3e50';
+                            break;
+                        case 'swap_positions':
+                            abilityIcon = '↔️';
+                            abilityColor = player.canSwap && abilityCooldown <= 0 ? '#2ecc71' : '#c0392b';
+                            break;
+                        case 'reverse_controls':
+                            abilityIcon = '🔄';
+                            abilityColor = '#e67e22';
+                            break;
+                    }
+
+
+                    if (abilityCooldown > 0) {
+                        ctx.fillStyle = 'rgba(0,0,0,0.5)';
+                        ctx.fillText(abilityIcon, abilityX, 40);
+                        ctx.font = '16px Rubik';
+                        ctx.fillStyle = 'white';
+                        ctx.fillText(Math.ceil(abilityCooldown), abilityX, 42);
+                    } else {
+                        ctx.fillStyle = abilityColor;
+                        ctx.fillText(abilityIcon, abilityX, 40);
+                        ctx.font = '12px Rubik';
+                        ctx.fillStyle = 'white';
+                        ctx.fillText(abilityKey, abilityX, 55);
+                    }
+                }
+            }
+            
+            if(gameMode === 'pvp') { ctx.fillStyle = 'white'; ctx.font = '14px Rubik'; ctx.textAlign = 'center'; ctx.fillText(playerLabel, canvas.width/2, 20); }
+
+            if(gameState===STATES.START){ctx.fillStyle='white';ctx.strokeStyle='black';ctx.lineWidth=2;ctx.textAlign='center';ctx.font='24px Rubik';ctx.fillText("Click to start",canvas.width/2,canvas.height/2-50);ctx.strokeText("Click to start",canvas.width/2,canvas.height/2-50)}
+            else if (gameState === STATES.PLAYING) {
+                ctx.fillStyle='white';ctx.strokeStyle='black';ctx.lineWidth=2;
+                ctx.textAlign='center';ctx.font='40px Rubik';
+                let scoreText = score.toString();
+                if (gameMode === 'bot') { scoreText = `${p1_score} - ${bot_score}`; }
+                else if (gameMode === 'pvp') { scoreText = `${p1_score} - ${p2_score}`; }
+                ctx.fillText(scoreText, canvas.width/2, 50); ctx.strokeText(scoreText, canvas.width/2, 50);
+                if (gameMode !== 'bot') { ctx.textAlign = 'left'; ctx.font = '20px Rubik'; ctx.fillText(`💰 ${coinCount} | 💎 ${diamondCount}`, 10, 80); ctx.strokeText(`💰 ${coinCount} | 💎 ${diamondCount}`, 10, 80); }
+            }
+        }
+        
+        // --- COLLISION AND GAME LOGIC ---
+        function checkCollisionFor(bird, canvas) {
+            if (!bird || bird.isDefeated) return false;
+            if (bird.isGhost) return false;
+            
+            if (bird.y + bird.height > canvas.height - 20) {
+                if (bird.hasShield) { bird.hasShield = false; bird.y = canvas.height - 20 - bird.height; bird.velocity = lift; return false; }
+                bird.isDefeated = true; return true;
+            }
+            for (const pipe of pipes) {
+                if (pipe.isDestroyed) continue;
+                if (bird.x < pipe.x + pipe.width && bird.x + bird.width > pipe.x && bird.y < pipe.y + pipe.height && bird.y + bird.height > pipe.y) {
+                    if (bird.hasShield) {
+                        bird.hasShield = false; 
+                        const otherPipe = pipes.find(p => p.x === pipe.x && p !== pipe);
+                        pipe.isDestroyed = true; 
+                        if (otherPipe) { otherPipe.isDestroyed = true; }
+                        return false; 
+                    }
+                    bird.isDefeated = true; return true;
+                }
+            }
+            for (const rock of projectiles) {
+                if (bird.x < rock.x + rock.width && bird.x + bird.width > rock.x && bird.y < rock.y + rock.height && bird.y + bird.height > rock.y) {
+                    if (bird.hasShield) {
+                        bird.hasShield = false;
+                        projectiles.splice(projectiles.indexOf(rock), 1);
+                        return false;
+                    }
+                    bird.isDefeated = true; return true;
+                }
+            }
+            return false;
+        }
+
+        function activatePowerUp(player, opponent) {
+            if (!player || player.heldPowerUps.length === 0) return;
+            const powerUpToUse = player.heldPowerUps.shift();
+            switch (powerUpToUse) {
+                case 'tnt':
+                    if (eventState === 'active' || eventState === 'warning') {
+                        projectiles = []; 
+                        eventBarrages = []; 
+                        eventState = 'none'; 
+                    } else {
+                        let nextPipe = null;
+                        for (const p of pipes) { if (p.x + p.width > player.x && p.isTop) { nextPipe = p; break; } }
+                        if (nextPipe) { const otherPipe = pipes.find(p => p.x === nextPipe.x && !p.isTop); nextPipe.isDestroyed = true; if (otherPipe) otherPipe.isDestroyed = true; }
+                    }
+                    break;
+                case 'ghost': player.isGhost = true; player.ghostTimer = 300; break;
+                case 'shield': player.hasShield = true; break;
+                case 'freeze': if (opponent) { opponent.freezeTimer = 45; } break;
+                case 'wind': if (opponent) { opponent.windEffect = Math.random() > 0.5 ? -0.4 : 0.4; opponent.windTimer = 240; } break;
+            }
+        }
+
+        function activateEquippedAbility(player, opponent) {
+            if (!player || !equippedAbility || !unlockedAbilities.includes(equippedAbility) || player.abilityCooldown > 0) return;
+        
+            switch(equippedAbility) {
+                case 'coin_magnet':
+                    player.isMagnetActive = true;
+                    player.magnetTimer = 300;
+                    player.abilityCooldown = 30; // Increased Cooldown
+                    break;
+
+                case 'blooper':
+                    if (opponent && !opponent.isBlooped) {
+                        opponent.isBlooped = true;
+                        opponent.bloopTimer = 300;
+                        opponent.bloopSplats = [];
+                        for(let i=0; i<8; i++) {
+                            opponent.bloopSplats.push({
+                                x: (Math.random() * 0.6 + 0.2) * canvas1.width,
+                                y: (Math.random() * 0.6 + 0.2) * canvas1.height,
+                                radius: Math.random() * 50 + 30
+                            });
+                        }
+                        player.abilityCooldown = 60; // Increased Cooldown
+                    }
+                    break;
+
+                case 'swap_positions':
+                    if (opponent && player.canSwap && !opponent.isDefeated && !opponent.isDefeated) {
+                        const tempX = player.x;
+                        const tempY = player.y;
+                        player.x = opponent.x;
+                        player.y = opponent.y;
+                        opponent.x = tempX;
+                        opponent.y = tempY;
+
+                        player.swapFlashTimer = 30;
+                        opponent.swapFlashTimer = 30;
+
+                        player.abilityCooldown = 30; // Increased Cooldown
+                    }
+                    break;
+                case 'reverse_controls':
+                    if (opponent && !opponent.isReversed && !opponent.isReversing) {
+                        opponent.isReversing = true;
+                        opponent.reversalCountdown = 180; // 3 seconds
+                        player.abilityCooldown = 40; // Increased Cooldown
+                    }
+                    break;
+            }
+        }
+
+        function checkItemCollisions(player) {
+            if (!player || player.isDefeated) return;
+            powerUps.forEach((p, index) => { if (player.x<p.x+p.width&&player.x+player.width>p.x&&player.y<p.y+p.height&&player.y+player.height>p.y) { if (player.heldPowerUps.length < player.maxPowerUps) { player.heldPowerUps.push(p.type); powerUps.splice(index, 1); } } });
+            coins.forEach((c, index) => { 
+                if (player.x<c.x+c.width&&player.x+player.width>c.x&&player.y<c.y+c.height&&player.y+player.height>c.y) { 
+                    if(gameMode!=='bot') {
+                        coinCount++; 
+                        if (dailyMission && dailyMission.type === 'collect_coins' && !missionProgress.claimed) {
+                            missionProgress.current++;
+                        }
+                    } 
+                    coins.splice(index, 1); 
+                } 
+            });
+            diamonds.forEach((d, index) => { 
+                if (player.x<d.x+d.width&&player.x+player.width>d.x&&player.y<d.y+d.height&&player.y+player.height>d.y) { 
+                    if(gameMode!=='bot') {
+                        diamondCount++; 
+                        if (dailyMission && dailyMission.type === 'collect_diamonds' && !missionProgress.claimed) {
+                            missionProgress.current++;
+                        }
+                    }
+                    diamonds.splice(index, 1); 
+                } 
+            });
+        }
+
+        function checkCollisions(){
+            if (player1) { 
+                checkItemCollisions(player1); 
+                if (checkCollisionFor(player1, canvas1)) {
+                    if (gameMode === 'solo' || gameMode === 'bot') {
+                        gameOver();
+                    }
+                }
+            }
+            if (player2) { 
+                checkItemCollisions(player2); 
+                if (checkCollisionFor(player2, canvas2)) {
+                    if (gameMode === 'pvp') {
+                        gameOver();
+                    }
+                }
+            }
+            if (bot) { 
+                checkItemCollisions(bot); 
+                if (checkCollisionFor(bot, canvas1)) {
+                    if (gameMode === 'bot') {
+                        gameOver();
+                    }
+                }
+            }
+            if (gameMode === 'pvp' && (player1.isDefeated || player2.isDefeated)) {
+                gameOver();
+            }
+        }
+
+        function updateScore(){
+            if (p1_score > 0 && p1_score % 50 === 0 && gameState !== STATES.BOSS_BATTLE) {
+                startBossBattle();
+                return;
+            }
+            pipes.forEach(pipe => {
+                if (pipe.isTop && !pipe.isDestroyed) {
+                    const pipeCenter = pipe.x + pipe.width / 2;
+                    let p1_scored = false, p2_scored = false, bot_scored = false;
+
+                    if (player1 && !player1.isDefeated && !pipe.p1_passed && player1.x > pipeCenter) { 
+                        p1_score++; 
+                        pipe.p1_passed = true;
+                        p1_scored = true;
+                    }
+                    if (player2 && !player2.isDefeated && !pipe.p2_passed && player2.x > pipeCenter) { 
+                        p2_score++; 
+                        pipe.p2_passed = true;
+                        p2_scored = true;
+                    }
+                    if (bot && !bot.isDefeated && !pipe.bot_passed && bot.x > pipeCenter) { 
+                        bot_score++; 
+                        pipe.bot_passed = true; 
+                        bot_scored = true;
+                    }
+                    
+                    if (p1_scored) {
+                        if (dailyMission && dailyMission.type === 'score' && p1_score > missionProgress.current && !missionProgress.claimed) {
+                            missionProgress.current = p1_score;
+                        }
+                        if (p1_score >= nextEventScore && eventState === 'none') {
+                            eventState = 'clearing';
+                            nextEventScore += Math.floor(Math.random() * 8) + 15; // 15-22
+                            
+                            const barrageCount = Math.floor(Math.random() * 2) + 1; // 1 or 2 barrages
+                            eventBarrages = [];
+                            for (let i = 0; i < barrageCount; i++) {
+                                const types = ['top', 'bottom', 'middle_gap'];
+                                const randomType = types[Math.floor(Math.random() * types.length)];
+                                eventBarrages.push(randomType);
+                            }
+                        }
+                        if (player1.abilityCooldown > 0 && equippedAbility === 'coin_magnet') player1.abilityCooldown--;
+                        if (player2 && player2.isBlooped) player2.isBlooped = false;
+                        if (bot && bot.isBlooped) bot.isBlooped = false;
+                    }
+                    if(p2_scored) {
+                        if (player2.abilityCooldown > 0 && equippedAbility === 'coin_magnet') player2.abilityCooldown--;
+                        if (player1.isBlooped) player1.isBlooped = false;
+                    }
+                    if(bot_scored && player1.isBlooped) player1.isBlooped = false;
+                }
+            });
+        }
+
+        function checkBattlePassLevelUp() {
+            let newLevel = 0;
+            const allTiers = [...battlePassTiers, ...(hasBattlePassPlus ? battlePassPlusTiers : [])].sort((a,b) => a.xpRequired - b.xpRequired);
+            for(const tier of allTiers) {
+                if(battlePassXP >= tier.xpRequired) {
+                    newLevel = Math.max(newLevel, tier.level);
+                }
+            }
+            battlePassLevel = newLevel;
+        }
+        
+        function gameOver() {
+            if (gameState === STATES.GAMEOVER) return;
+            gameState = STATES.GAMEOVER;
+            totalCoins += coinCount;
+            totalDiamonds += diamondCount;
+            battlePassXP += p1_score + (p2_score > 0 ? p2_score : 0); 
+
+            // Update mission progress
+            if (dailyMission && !missionProgress.claimed) {
+                if (dailyMission.type === 'score' && p1_score > missionProgress.current) {
+                    missionProgress.current = p1_score;
+                }
+                if (dailyMission.type === 'win_bot' && gameMode === 'bot' && !player1.isDefeated) {
+                    missionProgress.current++;
+                }
+            }
+
+            checkBattlePassLevelUp();
+            saveGame();
+
+            let text = "", color = "white";
+            if(gameMode === 'bot'){ const win = !player1.isDefeated; text = win ? "You Won!" : "You Lost!"; color = win ? 'lightgreen' : 'tomato'; finalScores.textContent = `Your Score: ${p1_score} | Bot's Score: ${bot_score}`; }
+            else if (gameMode === 'pvp') { 
+                if (player1.isDefeated && !player2.isDefeated) { text = "Player 2 (Right) Wins!"; color = '#7f8c8d'; } 
+                else if (!player1.isDefeated && player2.isDefeated) { text = "Player 1 (Left) Wins!"; color = '#FFD700'; } 
+                else { text = p1_score > p2_score ? "Player 1 (Left) Wins!" : (p2_score > p1_score ? "Player 2 (Right) Wins!" : "It's a Tie!"); color = p1_score > p2_score ? '#FFD700' : (p2_score > p1_score ? '#7f8c8d' : 'white'); }
+                finalScores.textContent = `Player 1: ${p1_score} | Player 2: ${p2_score}`; 
+            }
+            else { text = "Game Over"; finalScores.textContent = `Score: ${p1_score}`; }
+            winnerTextElem.textContent = text; winnerTextElem.style.color = color;
+            gameOverOverlay.style.display = 'flex';
+        }
+        
+        function grantPrize(prize) {
+            if (!prize) return;
+            
+            let actualPrize = { ...prize }; 
+
+            if (prize.type === 'coins') {
+                totalCoins += prize.value;
+            } else if (prize.type === 'diamonds') {
+                totalDiamonds += prize.value;
+            } else if (prize.type === 'ability_points') {
+                abilityPoints += prize.value;
+            } else if (prize.type === 'skin') {
+                if (!unlockedSkins.includes(prize.value)) {
+                    unlockedSkins.push(prize.value);
+                } else {
+                    totalCoins += 50; 
+                    actualPrize = { type: 'coins', value: 50 };
+                }
+            }
+            
+            rewardToShowcase = actualPrize;
+            previousGameState = STATES.SHOP;
+            gameState = STATES.REWARD_SHOWCASE;
+            
+            saveGame();
+        }
+
+        function canSpinWheel() {
+            if (isSpinning) return false;
+            const twelveHoursInMillis = 12 * 60 * 60 * 1000;
+            const now = new Date().getTime();
+            return (now - lastSpinTime) > twelveHoursInMillis;
+        }
+
+        function spinWheel() {
+            if (!canSpinWheel()) return;
+
+            lastSpinTime = new Date().getTime();
+            saveGame();
+
+            isSpinning = true;
+            wheelVelocity = Math.random() * 0.15 + 0.2;
+            wheelPrize = null;
+        }
+
+        function spawnRockWall(type) {
+            const rockHeight = 30;
+            const gapSize = pipeGap + 20;
+
+            if (type === 'bottom') {
+                for (let i = canvas1.height / 2; i < canvas1.height - 20; i += rockHeight + 5) {
+                    projectiles.push(new Rock(canvas1.width, i));
+                }
+            } else if (type === 'top') {
+                for (let i = 0; i < canvas1.height / 2; i += rockHeight + 5) {
+                    projectiles.push(new Rock(canvas1.width, i));
+                }
+            } else if (type === 'middle_gap') {
+                const gapTop = (canvas1.height - gapSize) / 2;
+                const gapBottom = gapTop + gapSize;
+                for (let i = 0; i < gapTop; i += rockHeight + 5) {
+                    projectiles.push(new Rock(canvas1.width, i));
+                }
+                for (let i = gapBottom; i < canvas1.height - 20; i += rockHeight + 5) {
+                    projectiles.push(new Rock(canvas1.width, i));
+                }
+            }
+        }
+
+        function startBossBattle() {
+            gameState = STATES.BOSS_BATTLE;
+            boss = new Boss();
+            pipes = [];
+            powerUps = [];
+            coins = [];
+            diamonds = [];
+            projectiles = [];
+        }
+
+        function updateBossBattle() {
+            handleInput();
+            player1.update(canvas1);
+            boss.update();
+
+            // Player projectile collision with boss
+            playerProjectiles.forEach((pp, ppIndex) => {
+                if (pp.x < boss.x + boss.width && pp.x + pp.width > boss.x &&
+                    pp.y < boss.y + boss.height && pp.y + pp.height > boss.y) {
+                    boss.health -= 10;
+                    playerProjectiles.splice(ppIndex, 1);
+                    if (boss.health <= 0) {
+                        // Boss defeated
+                        gameState = STATES.PLAYING;
+                        p1_score++; // So the boss doesn't re-trigger immediately
+                        totalCoins += 100;
+                        totalDiamonds += 10;
+                        saveGame();
+                    }
+                }
+            });
+
+            // Boss projectile collision with player
+            boss.projectiles.forEach((bp, bpIndex) => {
+                if (player1.x < bp.x + bp.width && player1.x + player1.width > bp.x &&
+                    player1.y < bp.y + bp.height && player1.y + player1.height > bp.y) {
+                    player1.health -= 25;
+                    boss.projectiles.splice(bpIndex, 1);
+                    if (player1.health <= 0) {
+                        gameOver();
+                    }
+                }
+            });
+
+            playerProjectiles.forEach(pp => pp.update());
+            playerProjectiles = playerProjectiles.filter(pp => pp.x < canvas1.width);
+        }
+
+        function drawBossBattle() {
+            ctx1.clearRect(0, 0, canvas1.width, canvas1.height);
+            ctx1.fillStyle = '#2c3e50'; // Darker background for boss battle
+            ctx1.fillRect(0, 0, canvas1.width, canvas1.height);
+
+            player1.draw(ctx1, canvas1);
+            boss.draw(ctx1);
+
+            playerProjectiles.forEach(pp => pp.draw(ctx1));
+            boss.projectiles.forEach(bp => bp.draw(ctx1));
+
+            // Player Health Bar
+            ctx1.fillStyle = 'grey';
+            ctx1.fillRect(10, 10, 100, 10);
+            ctx1.fillStyle = 'green';
+            ctx1.fillRect(10, 10, player1.health, 10);
+
+            // Boss Health Bar
+            ctx1.fillStyle = 'grey';
+            ctx1.fillRect(canvas1.width - 110, 10, 100, 10);
+            ctx1.fillStyle = 'red';
+            ctx1.fillRect(canvas1.width - 110, 10, boss.health, 10);
+        }
+
+        // --- EVENT HANDLERS ---
+        const keys = {};
+        document.addEventListener('keydown', e => { keys[e.key.toLowerCase()] = true; });
+        document.addEventListener('keyup', e => { keys[e.key.toLowerCase()] = false; });
+
+        function handleMenuClick(event) {
+            const canvas = event.currentTarget;
+            const rect=canvas.getBoundingClientRect(), scaleX=canvas.width/rect.width, scaleY=canvas.height/rect.height, x=(event.clientX-rect.left)*scaleX, y=(event.clientY-rect.top)*scaleY;
+            
+            function isInside(pos, rect){return pos.x > rect.x && pos.x < rect.x+rect.w && pos.y < rect.y+rect.h && pos.y > rect.y;}
+            
+            if (gameState === STATES.REWARD_SHOWCASE) { 
+                gameState = previousGameState;
+                rewardToShowcase = null; 
+                return; 
+            }
+
+            if (gameState === STATES.DIFFICULTY_SELECT) {
+                if (isInside({x,y}, buttons.easy)) resetGame('bot', 'easy');
+                else if (isInside({x,y}, buttons.medium)) resetGame('bot', 'medium');
+                else if (isInside({x,y}, buttons.hard)) resetGame('bot', 'hard');
+                else if (isInside({x,y}, { ...buttons.back, y: 360 })) { gameState = STATES.HOME; }
+            }
+            else if (gameState === STATES.HOME) {
+                if (isInside({x,y}, buttons.worlds)) { gameState = STATES.WORLDS; mapScrollX = 0; }
+                else if (isInside({x,y}, buttons.solo)) resetGame('solo');
+                else if (isInside({x,y}, buttons.bot)) { gameState = STATES.DIFFICULTY_SELECT; }
+                else if (isInside({x,y}, buttons.pvp)) { resetGame('pvp'); }
+                else if (isInside({x,y}, buttons.customization)) { gameState = STATES.CUSTOMIZATION; }
+                else if (isInside({x,y}, buttons.shop)) { gameState = STATES.SHOP; }
+                else if (isInside({x,y}, buttons.battlePass)) { gameState = STATES.BATTLE_PASS; battlePassScrollY = 0; }
+                else if (dailyMission && missionProgress.current >= dailyMission.target && !missionProgress.claimed && isInside({x,y}, buttons.claimMission)) {
+                    const reward = dailyMission.reward;
+                    if(reward.type === 'coins') totalCoins += reward.value;
+                    else if(reward.type === 'diamonds') totalDiamonds += reward.value;
+                    else if(reward.type === 'ability_points') abilityPoints += reward.value;
+                    missionProgress.claimed = true;
+                    saveGame();
+                }
+            } else if (gameState === STATES.CUSTOMIZATION) {
+                if (isInside({x,y}, buttons.skins)) { gameState = STATES.SKINS; skinsScrollY = 0; }
+                else if (isInside({x,y}, buttons.abilities)) { gameState = STATES.ABILITIES_SHOP; abilitiesScrollY = 0; }
+                else if (isInside({x,y}, buttons.cosmetics)) { gameState = STATES.COSMETICS; }
+                else if (isInside({x,y}, { ...buttons.back, y: 360 })) { gameState = STATES.HOME; }
+            } else if (gameState === STATES.SHOP) {
+                if (isInside({x,y}, buttons.spinWheel) && !isSpinning) { spinWheel(); }
+                else if (isInside({x,y}, buttons.back)) { gameState = STATES.HOME; }
+            } else if (gameState === STATES.BATTLE_PASS) {
+                const backBtn = {...buttons.back, x: 10, y: 15, w: 80, h: 30};
+                if (isInside({x,y}, backBtn)) { gameState = STATES.HOME; return; }
+
+                const clickPosBP = { x: x, y: y + battlePassScrollY };
+                let startY = 100;
+                const buyPanelHeight = 140;
+
+                if (!hasBattlePassPlus) {
+                    const buyBtnRect = {x: menuCanvas.width/2 - 50, y: startY + 90, w: 100, h: 40};
+                    if (isInside(clickPosBP, buyBtnRect)) {
+                        hasBattlePassPlus = true;
+                        saveGame();
+                        return;
+                    }
+                    startY += buyPanelHeight + 20;
+                }
+
+                // Tier click logic
+                const totalTiers = Math.max(battlePassTiers.length, battlePassPlusTiers.length);
+                const tierHeight = 120;
+                const tierSpacing = 20;
+                const xLeft = 30;
+                const xRight = menuCanvas.width - 130;
+
+                for(let i = 0; i < totalTiers; i++) {
+                    const tierY = startY + i * (tierHeight + tierSpacing);
+                    const tierRectLeft = { x: xLeft, y: tierY, w: 100, h: 100 }; // Left tier
+                    const tierRectRight = { x: xRight, y: tierY, w: 100, h: 100 }; // Right tier
+
+                    if (isInside(clickPosBP, tierRectLeft)) { // Clicked left row
+                        const tier = battlePassPlusTiers[i];
+                        if (tier && battlePassXP >= tier.xpRequired && hasBattlePassPlus && !claimedPlusTiers.includes(tier.level)) {
+                            const reward = tier.reward;
+                            if(reward.type === 'coins') totalCoins += reward.value;
+                            else if(reward.type === 'diamonds') totalDiamonds += reward.value;
+                            else if(reward.type === 'skin' && !unlockedSkins.includes(reward.value)) unlockedSkins.push(reward.value);
+                            else if(reward.type === 'ability_points') abilityPoints += reward.value;
+                            claimedPlusTiers.push(tier.level);
+                            rewardToShowcase = { ...reward, bpType: 'plus' };
+                            previousGameState = STATES.BATTLE_PASS;
+                            gameState = STATES.REWARD_SHOWCASE;
+                            saveGame();
+                        }
+                    } else if (isInside(clickPosBP, tierRectRight)) { // Clicked right row
+                        const tier = battlePassTiers[i];
+                        if (tier && battlePassXP >= tier.xpRequired && !claimedTiers.includes(tier.level)) {
+                            const reward = tier.reward;
+                            if(reward.type === 'coins') totalCoins += reward.value;
+                            else if(reward.type === 'diamonds') totalDiamonds += reward.value;
+                            else if(reward.type === 'skin' && !unlockedSkins.includes(reward.value)) unlockedSkins.push(reward.value);
+                            else if(reward.type === 'ability_points') abilityPoints += reward.value;
+                            else if(reward.type === 'trail' && !unlockedTrails.includes(reward.value)) unlockedTrails.push(reward.value);
+                            claimedTiers.push(tier.level);
+                            rewardToShowcase = { ...reward, bpType: 'standard' };
+                            previousGameState = STATES.BATTLE_PASS;
+                            gameState = STATES.REWARD_SHOWCASE;
+                            saveGame();
+                        }
+                    }
+                }
+
+            } else if (gameState === STATES.SKINS) {
+                const clickPos = { x, y: y + skinsScrollY };
+                if (isInside({x,y}, buttons.back)) { gameState = STATES.CUSTOMIZATION; return; }
+                
+                let currentY = 80;
+                const skinTiers = ['Common', 'Rare', 'Epic', 'Legendary'];
+                const skinKeys = Object.keys(skins);
+
+                for(const tier of skinTiers) {
+                    const tierSkins = skinKeys.filter(key => skins[key].tier === tier);
+                    currentY += 30;
+                    for (let i = 0; i < tierSkins.length; i++) {
+                        const key = tierSkins[i];
+                        const skin = skins[key];
+                        const cols = 4; const itemSize = 40; const hPadding = 20;
+                        const itemSpacing = (menuCanvas.width - 2 * hPadding - cols * itemSize) / (cols - 1);
+                        const col = i % cols;
+                        const row = Math.floor(i / cols);
+                        const skinX = hPadding + col * (itemSize + itemSpacing) + itemSize / 2;
+                        const skinY = currentY + row * (itemSize + 60);
+                        const skinRect = { x: skinX - itemSize/2, y: skinY - itemSize/2, w: itemSize, h: itemSize + 40 };
+
+                        if (isInside(clickPos, skinRect)) {
+                            if (unlockedSkins.includes(skin.name)) {
+                                currentSkin = skin;
+                                currentSkinName = skin.name;
+                                saveGame();
+                            } else {
+                                if (totalCoins >= skin.cost) {
+                                    totalCoins -= skin.cost;
+                                    unlockedSkins.push(skin.name);
+                                    currentSkin = skin;
+                                    currentSkinName = skin.name;
+                                    saveGame();
+                                }
+                            }
+                            return;
+                        }
+                    }
+                    currentY += Math.ceil(tierSkins.length / 4) * 80;
+                }
+            } else if (gameState === STATES.ABILITIES_SHOP) {
+                const clickPosAbilities = { x, y: y + abilitiesScrollY };
+                if (isInside({x, y}, buttons.back)) { gameState = STATES.CUSTOMIZATION; return; }
+
+                let yPos = 80;
+                for (const key in permanentAbilities) {
+                    const ability = permanentAbilities[key];
+                    const btnRect = { x: menuCanvas.width - 110, y: yPos + 20, w: 90, h: 40 };
+                    const itemRect = { x: 10, y: yPos, w: menuCanvas.width - 20, h: 80 };
+
+                    if(isInside(clickPosAbilities, itemRect)) {
+                        if(isInside(clickPosAbilities, btnRect)) {
+                            if (!unlockedAbilities.includes(key)) {
+                                if (abilityPoints >= ability.cost) {
+                                    abilityPoints -= ability.cost;
+                                    unlockedAbilities.push(key);
+                                    saveGame();
+                                }
+                            } else {
+                                equippedAbility = (equippedAbility === key) ? null : key;
+                                saveGame();
+                            }
+                        }
+                        return;
+                    }
+                    yPos += 90;
+                }
+            } else if (gameState === STATES.COSMETICS) {
+                if (isInside({x,y}, { ...buttons.back, y: 360 })) { gameState = STATES.CUSTOMIZATION; return; }
+
+                let yPos = 110;
+                Object.values(trails).forEach(trail => {
+                    const trailBtn = { x: 20, y: yPos, w: 150, h: 40 };
+                    if (isInside({x,y}, trailBtn)) {
+                        if (!unlockedTrails.includes(trail.name)) {
+                            unlockedTrails.push(trail.name);
+                        }
+                        equippedTrail = equippedTrail === trail.name ? null : trail.name;
+                        saveGame();
+                    }
+                    yPos += 50;
+                });
+            } else if (gameState === STATES.WORLDS) {
+                if (isInside({x,y}, { ...buttons.back, y: 420 })) { gameState = STATES.HOME; }
+            }
+        }
+        
+        function handleInput() {
+            // Player 1 Controls
+            if (player1 && !player1.isDefeated) {
+                const reverseX = player1.isReversed ? -1 : 1;
+                if (keys['a']) player1.velocityX = -2 * reverseX;
+                else if (keys['d']) player1.velocityX = 2 * reverseX;
+                else player1.velocityX = 0;
+
+                if (keys['w'] || keys[' ']) { 
+                    player1.flap(); 
+                    keys['w'] = false;
+                    keys[' '] = false;
+                }
+                if (keys['e']) { activatePowerUp(player1, player2 || bot); keys['e'] = false; }
+                if (keys['f']) { activateEquippedAbility(player1, player2 || bot); keys['f'] = false; }
+                if (keys['x']) { if(gameState === STATES.BOSS_BATTLE) player1.shoot(); keys['x'] = false; }
+            }
+
+            // Player 2 Controls (PvP Only)
+            if (gameMode === 'pvp' && player2 && !player2.isDefeated) {
+                const reverseX = player2.isReversed ? -1 : 1;
+                if (keys['arrowleft']) player2.velocityX = -2 * reverseX;
+                else if (keys['arrowright']) player2.velocityX = 2 * reverseX;
+                else player2.velocityX = 0;
+
+                if (keys['arrowup']) { player2.flap(); keys['arrowup'] = false; }
+                if (keys['0']) { activatePowerUp(player2, player1); keys['0'] = false; }
+                if (keys['control']) { activateEquippedAbility(player2, player1); keys['control'] = false; }
+            }
+        }
+
+        // --- LISTENERS ---
+        menuCanvas.addEventListener('mousedown', (event) => {
+            if (gameState === STATES.WORLDS) {
+                isDraggingMap = true;
+                lastMouseX = event.clientX;
+            } else if (gameState === STATES.BATTLE_PASS) {
+                isDraggingBattlePass = true;
+                lastMouseYBP = event.clientY;
+            }
+        });
+
+        menuCanvas.addEventListener('mouseup', () => {
+            isDraggingMap = false;
+            isDraggingBattlePass = false;
+        });
+
+        menuCanvas.addEventListener('mouseleave', () => {
+            isDraggingMap = false;
+            isDraggingBattlePass = false;
+        });
+
+        menuCanvas.addEventListener('mousemove', (event) => {
+            if (isDraggingMap) {
+                const dx = event.clientX - lastMouseX;
+                mapScrollX -= dx;
+                lastMouseX = event.clientX;
+                
+                if (mapScrollX < 0) mapScrollX = 0;
+                if (mapScrollX > maxMapScrollX) mapScrollX = maxMapScrollX;
+            } else if (isDraggingBattlePass) {
+                const dy = event.clientY - lastMouseYBP;
+                battlePassScrollY -= dy;
+                lastMouseYBP = event.clientY;
+
+                if (battlePassScrollY < 0) battlePassScrollY = 0;
+                if (battlePassScrollY > maxBattlePassScrollY) battlePassScrollY = maxBattlePassScrollY;
+            }
+        });
+
+        menuCanvas.addEventListener('wheel', (event) => {
+            event.preventDefault(); 
+            if (gameState === STATES.SKINS) {
+                skinsScrollY += event.deltaY * 0.5;
+                if (skinsScrollY < 0) skinsScrollY = 0;
+                if (skinsScrollY > maxScrollY) skinsScrollY = maxScrollY;
+            } else if (gameState === STATES.ABILITIES_SHOP) {
+                abilitiesScrollY += event.deltaY * 0.5;
+                if (abilitiesScrollY < 0) abilitiesScrollY = 0;
+                if (abilitiesScrollY > maxAbilitiesScrollY) abilitiesScrollY = maxAbilitiesScrollY;
+            } else if (gameState === STATES.BATTLE_PASS) {
+                battlePassScrollY += event.deltaY * 0.5;
+                if (battlePassScrollY < 0) battlePassScrollY = 0;
+                if (battlePassScrollY > maxBattlePassScrollY) battlePassScrollY = maxBattlePassScrollY;
+            }
+        });
+        menuCanvas.addEventListener('click', handleMenuClick);
+        canvas1.addEventListener('click', () => { if(player1) player1.flap(); });
+        canvas2.addEventListener('click', () => { if(player2) player2.flap(); });
+        gameOverOverlay.addEventListener('click', () => {
+            gameOverOverlay.style.display = 'none';
+            if (gameState === STATES.LEVEL_COMPLETE) {
+                gameState = STATES.WORLDS;
+            } else {
+                gameState = STATES.HOME; 
+            }
+            mainTitle.style.display = 'block';
+        });
+        
+        // --- INITIALIZE ---
+        setup();
+
+    </script>
+</body>
+</html>
