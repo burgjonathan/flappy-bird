@@ -62,6 +62,7 @@
     <audio id="bg-music" src="bg-music.mp3" loop></audio>
     <audio id="gameover-sfx" src="gameover.mp3"></audio>
     <audio id="coin-sfx" src="coin.mp3"></audio> 
+    <audio id="flap-sfx" src="wings-flapping.mp3"></audio>
     <button id="music-toggle" style="position:fixed;top:20px;right:20px;z-index:1000;font-size:20px;padding:8px 16px;border-radius:8px;border:none;background:#3498db;color:white;cursor:pointer;">🔊</button>
     <div class="container">
         <h1 id="main-title">Flappy Bird</h1>
@@ -547,6 +548,15 @@
                 if(!this.isDefeated && this.freezeTimer <= 0) {
                     this.velocity = this.isReversed ? -lift : lift;
                     
+                    // Play flap sound for player1 and player2 only
+                    if (!this.isBot) {
+                        const flapSfx = document.getElementById('flap-sfx');
+                        if (flapSfx) {
+                            flapSfx.currentTime = 0;
+                            flapSfx.volume = 0.55;
+                            flapSfx.play();
+                        }
+                    }
                     if(gameState === STATES.START) {
                         gameState = STATES.PLAYING;
                     }
@@ -2738,7 +2748,7 @@
 
         // Set coin sound effect volume lower
         const coinSfx = document.getElementById('coin-sfx');
-        if (coinSfx) coinSfx.volume = 0.05;
+        if (coinSfx) coinSfx.volume = 0.07;
 
         // --- BACKGROUND MUSIC LOGIC ---
         const bgMusic = document.getElementById('bg-music');
