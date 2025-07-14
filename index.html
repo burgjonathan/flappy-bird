@@ -6,14 +6,24 @@
     <title>Flappy Bird</title>
     <link href="https://fonts.googleapis.com/css2?family=Rubik:wght@400;700&display=swap" rel="stylesheet">
     <style>
+        html, body {
+            height: 100%;
+        }
         body {
             margin: 0; padding: 0; display: flex;
-            justify-content: center; align-items: center;
-            min-height: 100vh; background-color: #f0f8ff;
-            font-family: 'Rubik', sans-serif; color: #333; overflow: hidden;
+            flex-direction: column;
+            min-height: 100vh;
+            background-color: #f0f8ff;
+            font-family: 'Rubik', sans-serif; color: #333;
+            overflow-x: hidden;
             transition: background-color 0.5s;
         }
-        .container { position: relative; text-align: center; }
+        .container {
+            position: relative;
+            text-align: center;
+            margin: 60px auto 0 auto;
+            /* Center horizontally, margin-top for vertical spacing */
+        }
         h1 { color: #0077be; transition: color 0.5s; }
         #game-view {
             display: none; justify-content: center; align-items: center;
@@ -31,6 +41,21 @@
         }
         #winner-text { font-size: 30px; -webkit-text-stroke: 1px black; text-shadow: 2px 2px 4px #000; }
         .game-over-text { font-size: 24px; -webkit-text-stroke: 1px black; }
+        /* Comments section styling */
+        #comments {
+            max-width: 400px;
+            margin: 60px auto 40px auto;
+            padding: 0;
+        }
+        .utterances {
+            max-height: 400px;
+            overflow-y: auto;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.07);
+            border-radius: 8px;
+        }
+        @media (max-width: 500px) {
+            #comments { max-width: 98vw; }
+        }
     </style>
 </head>
 <body>
@@ -56,6 +81,17 @@
             </div>
         </div>
     </div>
+    <!-- Comments Section -->
+    <div id="comments">
+        <!-- Utterances will be injected here -->
+    </div>
+    <script src="https://utteranc.es/client.js"
+            repo="burgjonathan/flappy-bird"
+            issue-term="pathname"
+            theme="github-light"
+            crossorigin="anonymous"
+            async>
+    </script>
     
     <script>
         // --- DOM ELEMENTS ---
@@ -2789,15 +2825,6 @@
             };
         }
 
-    </script>
-    <!-- Comments Section -->
-    <div id="comments" style="max-width: 400px; margin: 40px auto 0 auto;"></div>
-    <script src="https://utteranc.es/client.js"
-            repo="burgjonathan/flappy-bird"
-            issue-term="pathname"
-            theme="github-light"
-            crossorigin="anonymous"
-            async>
     </script>
 </body>
 </html>
