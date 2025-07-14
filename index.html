@@ -66,6 +66,28 @@
             display: block !important;
           }
         }
+        #fullscreen-toggle {
+            display: none;
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            z-index: 1000;
+            font-size: 32px;
+            padding: 14px 18px;
+            border-radius: 50%;
+            border: none;
+            background: #27ae60;
+            color: white;
+        }
+        @media (max-width: 900px) {
+          #fullscreen-toggle {
+            display: block !important;
+            top: 20px;
+            right: 20px;
+            bottom: auto;
+            left: auto;
+          }
+        }
     </style>
 </head>
 <body>
