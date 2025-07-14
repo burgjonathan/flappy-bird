@@ -56,6 +56,16 @@
         @media (max-width: 500px) {
             #comments { max-width: 98vw; }
         }
+        @media (max-width: 900px) {
+          #joystick-container {
+            display: block !important;
+          }
+        }
+        @media (max-width: 900px) {
+          .mobile-fullscreen {
+            display: block !important;
+          }
+        }
     </style>
 </head>
 <body>
@@ -64,6 +74,7 @@
     <audio id="coin-sfx" src="coin.mp3"></audio> 
     <audio id="flap-sfx" src="wings-flapping.mp3"></audio>
     <button id="music-toggle" style="position:fixed;top:20px;right:20px;z-index:1000;font-size:20px;padding:8px 16px;border-radius:8px;border:none;background:#3498db;color:white;cursor:pointer;">🔊</button>
+    <button id="fullscreen-toggle" class="mobile-fullscreen" style="display:none;position:fixed;bottom:30px;right:30px;z-index:1000;font-size:32px;padding:14px 18px;border-radius:50%;border:none;background:#27ae60;color:white;">⛶</button>
     <div class="container">
         <h1 id="main-title">Flappy Bird</h1>
         <div id="menu-view">
@@ -2648,10 +2659,13 @@
             // Player 1 Controls
             if (player1 && !player1.isDefeated) {
                 const reverseX = player1.isReversed ? -1 : 1;
-                if (keys['a']) player1.velocityX = -2.2 * reverseX;
-                else if (keys['d']) player1.velocityX = 2.2 * reverseX;
-                else player1.velocityX = 0;
-
+                if (keys['a']) {
+                    player1.velocityX = -2.2 * reverseX;
+                } else if (keys['d']) {
+                    player1.velocityX = 2.2 * reverseX;
+                } else {
+                    player1.velocityX = 0;
+                }
                 if (keys['w'] || keys[' ']) { 
                     player1.flap(); 
                     keys['w'] = false;
@@ -2831,6 +2845,39 @@
                 this.x += this.speed;
             };
         }
+
+        // --- FULLSCREEN LOGIC FOR MOBILE ---
+        const fullscreenToggle = document.getElementById('fullscreen-toggle');
+        const gameContainer = document.querySelector('.container');
+        function isFullscreen() {
+            return document.fullscreenElement || document.webkitFullscreenElement || document.mozFullScreenElement || document.msFullscreenElement;
+        }
+        function enterFullscreen(elem) {
+            if (elem.requestFullscreen) elem.requestFullscreen();
+            else if (elem.webkitRequestFullscreen) elem.webkitRequestFullscreen();
+            else if (elem.mozRequestFullScreen) elem.mozRequestFullScreen();
+            else if (elem.msRequestFullscreen) elem.msRequestFullscreen();
+        }
+        function exitFullscreen() {
+            if (document.exitFullscreen) document.exitFullscreen();
+            else if (document.webkitExitFullscreen) document.webkitExitFullscreen();
+            else if (document.mozCancelFullScreen) document.mozCancelFullScreen();
+            else if (document.msExitFullscreen) document.msExitFullscreen();
+        }
+        function updateFullscreenIcon() {
+            fullscreenToggle.textContent = isFullscreen() ? '🗗' : '⛶';
+        }
+        fullscreenToggle.addEventListener('click', () => {
+            if (!isFullscreen()) {
+                enterFullscreen(gameContainer);
+            } else {
+                exitFullscreen();
+            }
+        });
+        document.addEventListener('fullscreenchange', updateFullscreenIcon);
+        document.addEventListener('webkitfullscreenchange', updateFullscreenIcon);
+        document.addEventListener('mozfullscreenchange', updateFullscreenIcon);
+        document.addEventListener('MSFullscreenChange', updateFullscreenIcon);
 
     </script>
 </body>
