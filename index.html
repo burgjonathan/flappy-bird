@@ -35,6 +35,8 @@
 </head>
 <body>
     <audio id="bg-music" src="bg-music.mp3" loop></audio>
+    <audio id="gameover-sfx" src="gameover.mp3"></audio>
+    <audio id="coin-sfx" src="coin.mp3"></audio> 
     <button id="music-toggle" style="position:fixed;top:20px;right:20px;z-index:1000;font-size:20px;padding:8px 16px;border-radius:8px;border:none;background:#3498db;color:white;cursor:pointer;">🔊</button>
     <div class="container">
         <h1 id="main-title">Flappy Bird</h1>
@@ -91,10 +93,11 @@
         let previousGameState = 'home';
 
 
-        const gravity = 0.2;
-        const lift = -4.0;
+        const gravity = 0.22;
+        const lift = -4.5;
         const pipeWidth = 52;
         const pipeGap = 120;
+        const obstacleSpeed = 2.0; // Use this for all obstacle movement and bot logic
         
         // --- EVENT VARIABLES ---
         let eventState = 'none'; // none, clearing, pre_warning_pause, warning, active
@@ -168,7 +171,8 @@
             HOME: 'home', SKINS: 'skins', COSMETICS: 'cosmetics', ABILITIES_SHOP: 'abilities_shop', 
             DIFFICULTY_SELECT: 'difficulty_select', START: 'start', PLAYING: 'playing', GAMEOVER: 'gameover', 
             BATTLE_PASS: 'battle_pass', REWARD_SHOWCASE: 'reward_showcase',
-            SHOP: 'shop', CUSTOMIZATION: 'customization', BOSS_BATTLE: 'boss_battle'
+            SHOP: 'shop', CUSTOMIZATION: 'customization', BOSS_BATTLE: 'boss_battle',
+            WORLDS: 'worlds',
         };
 
         // --- SKINS DEFINITION ---
@@ -488,7 +492,7 @@
                 if (this.swapFlashTimer > 0) this.swapFlashTimer--;
 
                 this.y += this.velocity;
-                this.x += this.velocityX;
+                this.x += this.velocityX * 2.2 / 2; // Moderate horizontal speed
                 if (this.y < 0) { this.y = 0; this.velocity = 0; }
                 if (this.x < 0) { this.x = 0; }
                 if (this.x + this.width > canvas.width) { this.x = canvas.width - this.width; }
@@ -575,16 +579,16 @@
             
                     switch(this.difficulty) {
                         case 'easy':
-                            aimOffset = (Math.random() - 0.5) * (pipeGap / 2);
-                            reactionChance = 0.1;
-                            break;
-                        case 'medium':
                             aimOffset = (Math.random() - 0.5) * (pipeGap / 3);
                             reactionChance = 0.05;
                             break;
-                        case 'hard':
+                        case 'medium':
                             aimOffset = (Math.random() - 0.5) * (pipeGap / 5);
                             reactionChance = 0.02;
+                            break;
+                        case 'hard':
+                            aimOffset = (Math.random() - 0.5) * (pipeGap / 8);
+                            reactionChance = 0.005;
                             break;
                     }
             
@@ -604,16 +608,16 @@
                 }
             }
         }
-        function Pipe(x,y,h,isTop, type){ this.x=x;this.y=y;this.width=pipeWidth;this.height=h;this.isTop=isTop; this.type=type; this.vy=type==='moving'?(Math.random()>.5?0.7:-0.7):0; this.initialY=y;this.moveRange=30;this.p1_passed=false;this.p2_passed=false;this.bot_passed=false;this.isDestroyed=false;this.draw=function(ctx){if(this.isDestroyed)return;ctx.fillStyle='#008000';ctx.fillRect(this.x,this.y,this.width,this.height);const a=25;if(this.isTop){ctx.fillRect(this.x-2,this.y+this.height-a,this.width+4,a)}else{ctx.fillRect(this.x-2,this.y,this.width+4,a)}};this.update=function(){this.x-=1.5;if(this.type==='moving'){this.y+=this.vy;if(this.y<this.initialY-this.moveRange||this.y>this.initialY+this.moveRange){this.vy*=-1}}}}
-        function PowerUp(x,y,type){this.x=x;this.y=y;this.type=type;this.width=30;this.height=30;this.draw=function(ctx){ctx.font='bold 20px Rubik';ctx.textAlign='center';ctx.textBaseline='middle';if('tnt'===this.type){ctx.fillStyle='red';ctx.fillRect(this.x,this.y,this.width,this.height);ctx.fillStyle='white';ctx.fillText('💣',this.x+this.width/2,this.y+this.height/2)}else if('ghost'===this.type){ctx.fillStyle='white';ctx.fillRect(this.x,this.y,this.width,this.height);ctx.fillText('👻',this.x+this.width/2,this.y+this.height/2+2)}else if('shield'===this.type){ctx.fillStyle='deepskyblue';ctx.fillRect(this.x,this.y,this.width,this.height);ctx.fillText('🛡️',this.x+this.width/2,this.y+this.height/2)}else if('freeze'===this.type){ctx.fillStyle='cyan';ctx.fillRect(this.x,this.y,this.width,this.height);ctx.fillText('❄️',this.x+this.width/2,this.y+this.height/2)}else if('wind'===this.type){ctx.fillStyle='lightgrey';ctx.fillRect(this.x,this.y,this.width,this.height);ctx.fillText('🌪️',this.x+this.width/2,this.y+this.height/2)}};this.update=function(){this.x-=1.5}}
-        function Coin(x, y) { this.x=x;this.y=y;this.width=20;this.height=20;this.draw=function(ctx){ctx.fillStyle='#FFD700';ctx.strokeStyle='#DAA520';ctx.lineWidth=2;ctx.beginPath();ctx.arc(this.x+this.width/2,this.y+this.height/2,this.width/2,0,Math.PI*2);ctx.fill();ctx.stroke();ctx.fillStyle='#DAA520';ctx.font='bold 12px Rubik';ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillText('$',this.x+this.width/2,this.y+this.height/2+1)};this.update=function(bird){this.x-=1.5; if(bird && bird.isMagnetActive){const dx=bird.x+bird.width/2-this.x;const dy=bird.y+bird.height/2-this.y;const dist=Math.sqrt(dx*dx+dy*dy);this.x+=dx/dist*3;this.y+=dy/dist*3;}}}
-        function Diamond(x,y){this.x=x;this.y=y;this.width=22;this.height=22;this.draw=function(ctx){ctx.save();ctx.fillStyle='#8e44ad';ctx.strokeStyle='#ecf0f1';ctx.lineWidth=2;ctx.beginPath();ctx.moveTo(this.x+this.width/2,this.y);ctx.lineTo(this.x+this.width,this.y+this.height/2);ctx.lineTo(this.x+this.width/2,this.y+this.height);ctx.lineTo(this.x,this.y+this.height/2);ctx.closePath();ctx.fill();ctx.stroke();ctx.restore()};this.update=function(bird){this.x-=1.5; if(bird && bird.isMagnetActive){const dx=bird.x+bird.width/2-this.x;const dy=bird.y+bird.height/2-this.y;const dist=Math.sqrt(dx*dx+dy*dy);this.x+=dx/dist*3;this.y+=dy/dist*3;}}}
+        function Pipe(x,y,h,isTop, type){ this.x=x;this.y=y;this.width=pipeWidth;this.height=h;this.isTop=isTop; this.type=type; this.vy=type==='moving'?(Math.random()>.5?0.7:-0.7):0; this.initialY=y;this.moveRange=30;this.p1_passed=false;this.p2_passed=false;this.bot_passed=false;this.isDestroyed=false;this.draw=function(ctx){if(this.isDestroyed)return;ctx.fillStyle='#008000';ctx.fillRect(this.x,this.y,this.width,this.height);const a=25;if(this.isTop){ctx.fillRect(this.x-2,this.y+this.height-a,this.width+4,a)}else{ctx.fillRect(this.x-2,this.y,this.width+4,a)}};this.update=function(){this.x-=obstacleSpeed;if(this.type==='moving'){this.y+=this.vy;if(this.y<this.initialY-this.moveRange||this.y>this.initialY+this.moveRange){this.vy*=-1}}}}
+        function PowerUp(x,y,type){this.x=x;this.y=y;this.type=type;this.width=30;this.height=30;this.draw=function(ctx){ctx.font='bold 20px Rubik';ctx.textAlign='center';ctx.textBaseline='middle';if('tnt'===this.type){ctx.fillStyle='red';ctx.fillRect(this.x,this.y,this.width,this.height);ctx.fillStyle='white';ctx.fillText('💣',this.x+this.width/2,this.y+this.height/2)}else if('ghost'===this.type){ctx.fillStyle='white';ctx.fillRect(this.x,this.y,this.width,this.height);ctx.fillText('👻',this.x+this.width/2,this.y+this.height/2+2)}else if('shield'===this.type){ctx.fillStyle='deepskyblue';ctx.fillRect(this.x,this.y,this.width,this.height);ctx.fillText('🛡️',this.x+this.width/2,this.y+this.height/2)}else if('freeze'===this.type){ctx.fillStyle='cyan';ctx.fillRect(this.x,this.y,this.width,this.height);ctx.fillText('❄️',this.x+this.width/2,this.y+this.height/2)}else if('wind'===this.type){ctx.fillStyle='lightgrey';ctx.fillRect(this.x,this.y,this.width,this.height);ctx.fillText('🌪️',this.x+this.width/2,this.y+this.height/2)}};this.update=function(){this.x-=obstacleSpeed}}
+        function Coin(x, y) { this.x=x;this.y=y;this.width=20;this.height=20;this.draw=function(ctx){ctx.fillStyle='#FFD700';ctx.strokeStyle='#DAA520';ctx.lineWidth=2;ctx.beginPath();ctx.arc(this.x+this.width/2,this.y+this.height/2,this.width/2,0,Math.PI*2);ctx.fill();ctx.stroke();ctx.fillStyle='#DAA520';ctx.font='bold 12px Rubik';ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillText('$',this.x+this.width/2,this.y+this.height/2+1)};this.update=function(bird){this.x-=obstacleSpeed; if(bird && bird.isMagnetActive){const dx=bird.x+bird.width/2-this.x;const dy=bird.y+bird.height/2-this.y;const dist=Math.sqrt(dx*dx+dy*dy);this.x+=dx/dist*obstacleSpeed;this.y+=dy/dist*obstacleSpeed;}}}
+        function Diamond(x,y){this.x=x;this.y=y;this.width=22;this.height=22;this.draw=function(ctx){ctx.save();ctx.fillStyle='#8e44ad';ctx.strokeStyle='#ecf0f1';ctx.lineWidth=2;ctx.beginPath();ctx.moveTo(this.x+this.width/2,this.y);ctx.lineTo(this.x+this.width,this.y+this.height/2);ctx.lineTo(this.x+this.width/2,this.y+this.height);ctx.lineTo(this.x,this.y+this.height/2);ctx.closePath();ctx.fill();ctx.stroke();ctx.restore()};this.update=function(bird){this.x-=obstacleSpeed; if(bird && bird.isMagnetActive){const dx=bird.x+bird.width/2-this.x;const dy=bird.y+bird.height/2-this.y;const dist=Math.sqrt(dx*dx+dy*dy);this.x+=dx/dist*obstacleSpeed;this.y+=dy/dist*obstacleSpeed;}}}
         function Rock(x, y) {
             this.x = x;
             this.y = y;
             this.width = 40;
             this.height = 30;
-            this.speed = 2.5;
+            this.speed = 5;
             this.draw = function(ctx) {
                 ctx.fillStyle = '#616161';
                 ctx.strokeStyle = '#424242';
@@ -638,7 +642,7 @@
             this.y = y;
             this.width = 10;
             this.height = 5;
-            this.speed = 7;
+            this.speed = 8;
             this.draw = function(ctx) {
                 ctx.fillStyle = 'yellow';
                 ctx.fillRect(this.x, this.y, this.width, this.height);
@@ -699,7 +703,8 @@
             skins: { x: menuCanvas.width / 2 - 75, y: 150, w: 150, h: 50, text: 'Skins' },
             abilities: { x: menuCanvas.width / 2 - 75, y: 220, w: 150, h: 50, text: 'Abilities' },
             cosmetics: { x: menuCanvas.width / 2 - 75, y: 290, w: 150, h: 50, text: 'Cosmetics' },
-            spinWheel: { x: menuCanvas.width / 2 - 60, y: 380, w: 120, h: 50, text: 'Spin!' }
+            spinWheel: { x: menuCanvas.width / 2 - 60, y: 380, w: 120, h: 50, text: 'Spin!' },
+            coop: { x: menuCanvas.width / 2 - 85, y: 400, w: 170, h: 35, text: 'Co-op Mode' },
         };
 
         function drawButton(ctx, btn, disabled = false, selected = false) { 
@@ -727,12 +732,14 @@
             gameView.style.display = 'flex';
             gameOverOverlay.style.display = 'none';
             player1 = new Bird({});
-            player2 = (gameMode === 'pvp') ? new Bird({isPlayer2: true}) : null;
+            player2 = (gameMode === 'pvp' || gameMode === 'coop') ? new Bird({isPlayer2: true}) : null;
             bot = (gameMode === 'bot') ? new Bird({isBot: true, difficulty: botDifficulty}) : null;
-            canvas2.style.display = (gameMode === 'pvp') ? 'block' : 'none';
-            if (gameMode !== 'pvp') { canvas1.style.margin = 'auto'; } else { canvas1.style.margin = '0';}
+            canvas2.style.display = (gameMode === 'pvp' || gameMode === 'coop') ? 'block' : 'none';
+            if (gameMode !== 'pvp' && gameMode !== 'coop') { canvas1.style.margin = 'auto'; } else { canvas1.style.margin = '0';}
             pipes = []; powerUps = []; coins = []; diamonds = []; projectiles = []; playerProjectiles = [];
-            
+            reviveTokens = [];
+            reviveTokenActive = false;
+            reviveTokenTimer = 0;
             p1_score = 0; p2_score = 0; bot_score = 0;
             coinCount = 0; diamondCount = 0; lastDiamondSpawnScore = -1;
             frames = 0; 
@@ -741,7 +748,6 @@
             eventTimer = 0;
             eventBarrages = [];
             nextEventScore = Math.floor(Math.random() * 5) + 10; // 10-14
-
             if (dailyMission && dailyMission.type === 'play_games' && !missionProgress.claimed) {
                 missionProgress.current++;
             }
@@ -773,6 +779,43 @@
             if (player1) player1.update(canvas1);
             if (player2) player2.update(canvas2);
             if (bot) bot.update(canvas1);
+
+            // Co-op revive logic
+            if (gameMode === 'coop' && player2) {
+                // If one player is dead and the other is alive, spawn revive tokens
+                if ((player1.isDefeated && !player2.isDefeated) || (!player1.isDefeated && player2.isDefeated)) {
+                    reviveTokenTimer++;
+                    if (reviveTokenTimer > 120 && reviveTokens.length < 1) { // spawn every 2 seconds if none on screen
+                        const y = Math.random() * (canvas1.height - 80) + 40;
+                        reviveTokens.push(new ReviveToken(y));
+                        reviveTokenTimer = 0;
+                    }
+                } else {
+                    reviveTokenTimer = 0;
+                }
+                // Update revive tokens
+                reviveTokens.forEach(token => token.update());
+                reviveTokens = reviveTokens.filter(token => token.x < canvas1.width + 40);
+                // Check for collection
+                let survivor = null, dead = null;
+                if (player1.isDefeated && !player2.isDefeated) { survivor = player2; dead = player1; }
+                if (player2.isDefeated && !player1.isDefeated) { survivor = player1; dead = player2; }
+                if (survivor && dead) {
+                    reviveTokens.forEach((token, idx) => {
+                        if (survivor.x < token.x + token.width && survivor.x + survivor.width > token.x &&
+                            survivor.y < token.y + token.height && survivor.y + survivor.height > token.y) {
+                            // Revive dead player at token's position
+                            dead.x = token.x;
+                            dead.y = token.y;
+                            dead.velocity = 0;
+                            dead.isDefeated = false;
+                            dead.health = 100;
+                            dead.trail = [];
+                            reviveTokens.splice(idx, 1);
+                        }
+                    });
+                }
+            }
 
             if (gameMode === 'pvp' || gameMode === 'bot') {
                 const opponent = player2 || bot;
@@ -823,7 +866,7 @@
 
                 // Pipe Spawning
                 const canSpawnPipes = eventState === 'none';
-                if(canSpawnPipes && frames % 140 === 0){
+                if(canSpawnPipes && frames % 120 === 0){
                     const topPipeHeight = Math.random()*(canvas1.height-pipeGap-150)+50;
                     const rand = Math.random();
                     let type = 'static';
@@ -836,7 +879,7 @@
                     pipes.push(topPipe, bottomPipe);
                     coins.push(new Coin(canvas1.width+pipeWidth/2-10, topPipeHeight+pipeGap/2-10));
                     
-                    const scoreToCheck = gameMode === 'pvp' ? Math.max(p1_score, p2_score) : p1_score;
+                    const scoreToCheck = gameMode === 'pvp' || gameMode === 'coop' ? Math.max(p1_score, p2_score) : p1_score;
                     if ((scoreToCheck + 1) % 5 === 0 && (scoreToCheck + 1) !== lastDiamondSpawnScore) {
                         diamonds.push(new Diamond(canvas1.width + pipeWidth / 2 - 11, topPipeHeight + pipeGap / 2 - 11));
                         lastDiamondSpawnScore = scoreToCheck + 1;
@@ -848,6 +891,8 @@
                         let powerUpPool;
                         if (gameMode === 'solo') {
                             powerUpPool = ['tnt', 'tnt', 'tnt', 'shield', 'ghost'];
+                        } else if (gameMode === 'coop') {
+                            powerUpPool = ['tnt', 'shield', 'ghost']; // No freeze, wind
                         } else {
                             powerUpPool = ['freeze', 'freeze', 'wind', 'wind', 'tnt', 'shield', 'ghost'];
                         }
@@ -978,6 +1023,7 @@
             drawButton(menuCtx, buttons.solo);
             drawButton(menuCtx, buttons.bot);
             drawButton(menuCtx, buttons.pvp);
+            drawButton(menuCtx, buttons.coop);
             drawButton(menuCtx, buttons.shop);
             drawButton(menuCtx, buttons.customization);
             drawButton(menuCtx, buttons.battlePass);
@@ -1783,7 +1829,10 @@
             for(const coin of coins) coin.draw(ctx);
             for(const diamond of diamonds) diamond.draw(ctx);
             for(const rock of projectiles) rock.draw(ctx);
-            
+            // Draw revive tokens in coop mode
+            if (gameMode === 'coop' && reviveTokens.length > 0) {
+                reviveTokens.forEach(token => token.draw(ctx));
+            }
             if (opponent) { ctx.save(); ctx.globalAlpha = 0.5; opponent.draw(ctx, canvas); ctx.restore(); }
             if(player) {
                 if (equippedAbility === 'swap_positions') {
@@ -1937,7 +1986,11 @@
             
             if (bird.y + bird.height > canvas.height - 20) {
                 if (bird.hasShield) { bird.hasShield = false; bird.y = canvas.height - 20 - bird.height; bird.velocity = lift; return false; }
-                bird.isDefeated = true; return true;
+                bird.isDefeated = true;
+                // Play game over sound immediately when bird dies
+                const gameoverSfx = document.getElementById('gameover-sfx');
+                if (gameoverSfx) { gameoverSfx.currentTime = 0; gameoverSfx.play(); }
+                return true;
             }
             for (const pipe of pipes) {
                 if (pipe.isDestroyed) continue;
@@ -1949,7 +2002,11 @@
                         if (otherPipe) { otherPipe.isDestroyed = true; }
                         return false; 
                     }
-                    bird.isDefeated = true; return true;
+                    bird.isDefeated = true;
+                    // Play game over sound immediately when bird dies
+                    const gameoverSfx = document.getElementById('gameover-sfx');
+                    if (gameoverSfx) { gameoverSfx.currentTime = 0; gameoverSfx.play(); }
+                    return true;
                 }
             }
             for (const rock of projectiles) {
@@ -1959,7 +2016,11 @@
                         projectiles.splice(projectiles.indexOf(rock), 1);
                         return false;
                     }
-                    bird.isDefeated = true; return true;
+                    bird.isDefeated = true;
+                    // Play game over sound immediately when bird dies
+                    const gameoverSfx = document.getElementById('gameover-sfx');
+                    if (gameoverSfx) { gameoverSfx.currentTime = 0; gameoverSfx.play(); }
+                    return true;
                 }
             }
             return false;
@@ -2045,6 +2106,9 @@
                 if (player.x<c.x+c.width&&player.x+player.width>c.x&&player.y<c.y+c.height&&player.y+player.height>c.y) { 
                     if(gameMode!=='bot') {
                         coinCount++; 
+                        // Play coin sound effect
+                        const coinSfx = document.getElementById('coin-sfx');
+                        if (coinSfx) { coinSfx.currentTime = 0; coinSfx.play(); }
                         if (dailyMission && dailyMission.type === 'collect_coins' && !missionProgress.claimed) {
                             missionProgress.current++;
                         }
@@ -2192,6 +2256,10 @@
             else { text = "Game Over"; finalScores.textContent = `Score: ${p1_score}`; }
             winnerTextElem.textContent = text; winnerTextElem.style.color = color;
             gameOverOverlay.style.display = 'flex';
+
+            // Play game over sound effect
+            const gameoverSfx = document.getElementById('gameover-sfx');
+            if (gameoverSfx) { gameoverSfx.currentTime = 0; gameoverSfx.play(); }
         }
         
         function grantPrize(prize) {
@@ -2363,6 +2431,7 @@
                 else if (isInside({x,y}, buttons.solo)) resetGame('solo');
                 else if (isInside({x,y}, buttons.bot)) { gameState = STATES.DIFFICULTY_SELECT; }
                 else if (isInside({x,y}, buttons.pvp)) { resetGame('pvp'); }
+                else if (isInside({x,y}, buttons.coop)) { resetGame('coop'); }
                 else if (isInside({x,y}, buttons.customization)) { gameState = STATES.CUSTOMIZATION; }
                 else if (isInside({x,y}, buttons.shop)) { gameState = STATES.SHOP; }
                 else if (isInside({x,y}, buttons.battlePass)) { gameState = STATES.BATTLE_PASS; battlePassScrollY = 0; }
@@ -2536,8 +2605,8 @@
             // Player 1 Controls
             if (player1 && !player1.isDefeated) {
                 const reverseX = player1.isReversed ? -1 : 1;
-                if (keys['a']) player1.velocityX = -2 * reverseX;
-                else if (keys['d']) player1.velocityX = 2 * reverseX;
+                if (keys['a']) player1.velocityX = -2.2 * reverseX;
+                else if (keys['d']) player1.velocityX = 2.2 * reverseX;
                 else player1.velocityX = 0;
 
                 if (keys['w'] || keys[' ']) { 
@@ -2553,8 +2622,8 @@
             // Player 2 Controls (PvP Only)
             if (gameMode === 'pvp' && player2 && !player2.isDefeated) {
                 const reverseX = player2.isReversed ? -1 : 1;
-                if (keys['arrowleft']) player2.velocityX = -2 * reverseX;
-                else if (keys['arrowright']) player2.velocityX = 2 * reverseX;
+                if (keys['arrowleft']) player2.velocityX = -2.2 * reverseX;
+                else if (keys['arrowright']) player2.velocityX = 2.2 * reverseX;
                 else player2.velocityX = 0;
 
                 if (keys['arrowup']) { player2.flap(); keys['arrowup'] = false; }
@@ -2634,6 +2703,10 @@
         // --- INITIALIZE ---
         setup();
 
+        // Set coin sound effect volume lower
+        const coinSfx = document.getElementById('coin-sfx');
+        if (coinSfx) coinSfx.volume = 0.3;
+
         // --- BACKGROUND MUSIC LOGIC ---
         const bgMusic = document.getElementById('bg-music');
         const musicToggle = document.getElementById('music-toggle');
@@ -2665,6 +2738,56 @@
         }
         window.addEventListener('mousedown', enableMusicOnFirstInteraction);
         window.addEventListener('keydown', enableMusicOnFirstInteraction);
+
+        // Prime gameover SFX on first user interaction
+        const gameoverSfx = document.getElementById('gameover-sfx');
+        function primeGameoverSfx() {
+            if (gameoverSfx) {
+                gameoverSfx.volume = 0.7; // Set volume if needed
+                gameoverSfx.play().then(() => {
+                    gameoverSfx.pause();
+                    gameoverSfx.currentTime = 0;
+                }).catch(() => {});
+            }
+            window.removeEventListener('mousedown', primeGameoverSfx);
+            window.removeEventListener('keydown', primeGameoverSfx);
+        }
+        window.addEventListener('mousedown', primeGameoverSfx);
+        window.addEventListener('keydown', primeGameoverSfx);
+
+        function ReviveToken(y) {
+            this.x = -40;
+            this.y = y;
+            this.width = 40;
+            this.height = 40;
+            this.speed = 2.0;
+            this.draw = function(ctx) {
+                // Glowing heart with wings
+                ctx.save();
+                ctx.shadowColor = 'pink';
+                ctx.shadowBlur = 15;
+                ctx.fillStyle = 'pink';
+                ctx.beginPath();
+                ctx.moveTo(this.x + 20, this.y + 30);
+                ctx.bezierCurveTo(this.x, this.y + 10, this.x + 10, this.y, this.x + 20, this.y + 10);
+                ctx.bezierCurveTo(this.x + 30, this.y, this.x + 40, this.y + 10, this.x + 20, this.y + 30);
+                ctx.fill();
+                ctx.shadowBlur = 0;
+                // Wings
+                ctx.strokeStyle = 'white';
+                ctx.lineWidth = 2;
+                ctx.beginPath();
+                ctx.moveTo(this.x + 5, this.y + 20);
+                ctx.quadraticCurveTo(this.x - 10, this.y + 10, this.x + 5, this.y + 5);
+                ctx.moveTo(this.x + 35, this.y + 20);
+                ctx.quadraticCurveTo(this.x + 50, this.y + 10, this.x + 35, this.y + 5);
+                ctx.stroke();
+                ctx.restore();
+            };
+            this.update = function() {
+                this.x += this.speed;
+            };
+        }
 
     </script>
 </body>
