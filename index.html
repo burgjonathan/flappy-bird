@@ -740,7 +740,6 @@
             abilities: { x: menuCanvas.width / 2 - 75, y: 220, w: 150, h: 50, text: 'Abilities' },
             cosmetics: { x: menuCanvas.width / 2 - 75, y: 290, w: 150, h: 50, text: 'Cosmetics' },
             spinWheel: { x: menuCanvas.width / 2 - 60, y: 380, w: 120, h: 50, text: 'Spin!' },
-            coop: { x: menuCanvas.width / 2 - 85, y: 400, w: 170, h: 35, text: 'Co-op Mode' },
         };
 
         function drawButton(ctx, btn, disabled = false, selected = false) { 
@@ -1059,7 +1058,6 @@
             drawButton(menuCtx, buttons.solo);
             drawButton(menuCtx, buttons.bot);
             drawButton(menuCtx, buttons.pvp);
-            drawButton(menuCtx, buttons.coop);
             drawButton(menuCtx, buttons.shop);
             drawButton(menuCtx, buttons.customization);
             drawButton(menuCtx, buttons.battlePass);
@@ -2467,7 +2465,6 @@
                 else if (isInside({x,y}, buttons.solo)) resetGame('solo');
                 else if (isInside({x,y}, buttons.bot)) { gameState = STATES.DIFFICULTY_SELECT; }
                 else if (isInside({x,y}, buttons.pvp)) { resetGame('pvp'); }
-                else if (isInside({x,y}, buttons.coop)) { resetGame('coop'); }
                 else if (isInside({x,y}, buttons.customization)) { gameState = STATES.CUSTOMIZATION; }
                 else if (isInside({x,y}, buttons.shop)) { gameState = STATES.SHOP; }
                 else if (isInside({x,y}, buttons.battlePass)) { gameState = STATES.BATTLE_PASS; battlePassScrollY = 0; }
