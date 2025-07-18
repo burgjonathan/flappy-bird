@@ -166,7 +166,7 @@
         const gravity = 0.22;
         const lift = -4.5;
         const pipeWidth = 52;
-        const pipeGap = 120;
+        const pipeGap = 160;
         const obstacleSpeed = 2.0; // Use this for all obstacle movement and bot logic
         
         // --- EVENT VARIABLES ---
@@ -576,6 +576,11 @@
                 this.trail = this.trail.filter(p => p.life > 0);
                 this.trail.forEach(p => p.life--);
 
+                // Prevent falling through the floor in boss battle
+                if ((gameState === STATES.BOSS_BATTLE || gameState === STATES.PLAYING) && this.y + this.height > canvas.height - 20) {
+                    this.y = canvas.height - 20 - this.height;
+                    this.velocity = 0;
+                }
             }
             this.flap = function() {
                 if(!this.isDefeated && this.freezeTimer <= 0) {
@@ -852,7 +857,12 @@
         }
 
         function update() {
-            handleInput(); 
+            handleInput();
+
+            if (gameState === STATES.BOSS_BATTLE) {
+                updateBossBattle();
+                return;
+            }
 
             if (player1) player1.update(canvas1);
             if (player2) player2.update(canvas2);
